@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module HsJupyter.Bridge.JupyterBridge
   ( BridgeContext(..)
   , BridgeError(..)
@@ -8,21 +10,28 @@ module HsJupyter.Bridge.JupyterBridge
   , rejectedCount
   ) where
 
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (Value, object, (.=), toJSON)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.List (zipWith)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
-import HsJupyter.Bridge.Protocol.Codec
-  ( verifySignature
-  )
+
+import HsJupyter.Bridge.Protocol.Codec (verifySignature)
 import HsJupyter.Bridge.Protocol.Envelope
   ( ExecuteReply(..)
+  , ExecuteRequest
+  , ExecuteStatus(..)
   , InterruptReply(..)
   , MessageHeader(..)
   , ProtocolEnvelope(..)
   , emptyMetadata
+  , envelopeContent
+  , envelopeHeader
+  , envelopeIdentities
+  , envelopeParent
   , fromExecuteRequest
+  , msgType
   , toExecuteReply
   )
 import HsJupyter.Kernel.Types
@@ -33,26 +42,24 @@ import HsJupyter.Kernel.Types
   )
 import HsJupyter.Router.RequestRouter
   ( Router
-  , RuntimeExecutionOutcome(..)
-  , RuntimeStreamChunk(..)
   , acknowledgeInterrupt
   , mkRouter
   , routeExecuteRequest
   )
-import HsJupyter.Runtime.Manager
-  ( RuntimeManager
-  , withRuntimeManager
-  )
+import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic(..))
+import HsJupyter.Runtime.Manager (RuntimeManager)
 import HsJupyter.Runtime.SessionState
-  ( ResourceBudget(..)
+  ( ExecutionOutcome(..)
+  , ExecutionStatus(..)
+  , StreamChunk(..)
+  , StreamName(..)
   )
 
 -- | Operational context shared by bridge handlers.
 data BridgeContext = BridgeContext
-  { bridgeConfig    :: KernelProcessConfig
-  , bridgeRouter    :: Router
-  , bridgeManager   :: RuntimeManager
-  , bridgeRejected  :: IORef Int
+  { bridgeConfig   :: KernelProcessConfig
+  , bridgeRouter   :: Router
+  , bridgeRejected :: IORef Int
   }
 
 -- | Failures surfaced to callers for error handling/logging.
@@ -61,23 +68,18 @@ data BridgeError
   | DecodeFailure Text
   deriving (Eq, Show)
 
--- | Construct a bridge context from kernel configuration and runtime manager.
 mkBridgeContext :: KernelProcessConfig -> RuntimeManager -> IO BridgeContext
 mkBridgeContext cfg manager = do
   rejectedVar <- newIORef 0
-  let router = mkRouter manager
   pure BridgeContext
     { bridgeConfig = cfg
-    , bridgeRouter = router
-    , bridgeManager = manager
+    , bridgeRouter = mkRouter manager
     , bridgeRejected = rejectedVar
     }
 
--- | Report how many envelopes were rejected for signature failures.
 rejectedCount :: BridgeContext -> IO Int
 rejectedCount = readIORef . bridgeRejected
 
--- | Process a single execute_request envelope and produce reply + streams.
 handleExecuteOnce
   :: BridgeContext
   -> ProtocolEnvelope Value
@@ -95,46 +97,117 @@ handleExecuteOnce ctx envelope = do
         pure $ Left (DecodeFailure "Unsupported content type")
       Just typed -> do
         outcome <- routeExecuteRequest (bridgeRouter ctx) typed
-        let replyEnv = toExecuteReply typed (toReply outcome)
-            streamEnvs = makeStreamEnvelope typed <$> routerStreams outcome
-        logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogDebug
-          ("Processed message " <> msgId (envelopeHeader typed))
-        pure $ Right (replyEnv : streamEnvs)
-  where
-    toReply outcome = ExecuteReply
-      { executeReplyCount = routerCount outcome
-      , executeReplyStatus = routerStatus outcome
-      , executeReplyPayload = [routerPayload outcome]
-      }
+        pure (Right (outcomeEnvelopes typed outcome))
 
-    makeStreamEnvelope reqEnv (RuntimeStreamChunk name chunkText) =
-      let header = (envelopeHeader reqEnv) { msgType = "stream" }
-      in ProtocolEnvelope
-          { envelopeIdentities = [T.pack "stream"]
-          , envelopeHeader = header
-          , envelopeParent = Just (envelopeHeader reqEnv)
-          , envelopeMetadata = emptyMetadata
-          , envelopeContent = object
-              [ "name" .= name
-              , "text" .= chunkText
-              ]
-          , envelopeSignature = ""
-          }
-
--- | Produce an interrupt acknowledgement envelope.
 handleInterrupt
   :: BridgeContext
   -> ProtocolEnvelope Value
-  -> ProtocolEnvelope Value
-handleInterrupt ctx env = env
-  { envelopeContent = object ["status" .= status]
-  , envelopeHeader = (envelopeHeader env) { msgType = "interrupt_reply" }
-  , envelopeSignature = ""
-  }
-  where
-    InterruptReply status = acknowledgeInterrupt (bridgeRouter ctx) env
+  -> IO (ProtocolEnvelope Value)
+handleInterrupt ctx env = do
+  InterruptReply status <- acknowledgeInterrupt (bridgeRouter ctx) env
+  let replyHeader = (envelopeHeader env) { msgType = "interrupt_reply" }
+  pure env
+    { envelopeHeader = replyHeader
+    , envelopeContent = object ["status" .= status]
+    , envelopeSignature = ""
+    }
 
--- | Lightweight console logger used during development.
+-- Envelope rendering -------------------------------------------------------
+
+outcomeEnvelopes
+  :: ProtocolEnvelope ExecuteRequest
+  -> ExecutionOutcome
+  -> [ProtocolEnvelope Value]
+outcomeEnvelopes request outcome =
+  let reply = toExecuteReply request ExecuteReply
+        { executeReplyCount = outcomeExecutionCount outcome
+        , executeReplyStatus = statusToReply (outcomeStatus outcome)
+        , executeReplyPayload = []
+        }
+      streams = fmap (streamEnvelope request) (outcomeStreams outcome)
+      results = zipWith (resultEnvelope request (outcomeExecutionCount outcome)) [0 :: Int ..] (outcomePayload outcome)
+      diagnostics = concatMap (diagnosticEnvelopes request) (outcomeDiagnostics outcome)
+  in reply : streams ++ results ++ diagnostics
+
+streamEnvelope
+  :: ProtocolEnvelope ExecuteRequest
+  -> StreamChunk
+  -> ProtocolEnvelope Value
+streamEnvelope request (StreamChunk name text) =
+  let header = (envelopeHeader request) { msgType = "stream" }
+      content = object
+        [ "name" .= streamNameLabel name
+        , "text" .= text
+        ]
+  in ProtocolEnvelope
+       { envelopeIdentities = envelopeIdentities request
+       , envelopeHeader = header
+       , envelopeParent = Just (envelopeHeader request)
+       , envelopeMetadata = emptyMetadata
+       , envelopeContent = content
+       , envelopeSignature = ""
+       }
+
+resultEnvelope
+  :: ProtocolEnvelope ExecuteRequest
+  -> Int
+  -> Int
+  -> Value
+  -> ProtocolEnvelope Value
+resultEnvelope request count index value =
+  let header = (envelopeHeader request) { msgType = "execute_result" }
+      content = object
+        [ "data" .= value
+        , "metadata" .= object []
+        , "execution_count" .= count
+        , "index" .= index
+        ]
+  in ProtocolEnvelope
+       { envelopeIdentities = envelopeIdentities request
+       , envelopeHeader = header
+       , envelopeParent = Just (envelopeHeader request)
+       , envelopeMetadata = object []
+       , envelopeContent = content
+       , envelopeSignature = ""
+       }
+
+diagnosticEnvelopes
+  :: ProtocolEnvelope ExecuteRequest
+  -> RuntimeDiagnostic
+  -> [ProtocolEnvelope Value]
+diagnosticEnvelopes request diag =
+  let header = (envelopeHeader request) { msgType = "stream" }
+      payload = object
+        [ "name" .= ("stderr" :: Text)
+        , "text" .= renderDiagnostic diag
+        ]
+  in [ ProtocolEnvelope
+         { envelopeIdentities = envelopeIdentities request
+         , envelopeHeader = header
+         , envelopeParent = Just (envelopeHeader request)
+         , envelopeMetadata = emptyMetadata
+         , envelopeContent = payload
+         , envelopeSignature = ""
+         }
+     ]
+
+renderDiagnostic :: RuntimeDiagnostic -> Text
+renderDiagnostic diag =
+  let detail = maybe "" (\d -> "\n" <> d) (rdDetail diag)
+  in rdSummary diag <> detail
+
+statusToReply :: ExecutionStatus -> ExecuteStatus
+statusToReply ExecutionOk            = ExecuteOk
+statusToReply ExecutionError         = ExecuteError
+statusToReply ExecutionAbort         = ExecuteError
+statusToReply ExecutionResourceLimit = ExecuteError
+
+streamNameLabel :: StreamName -> Text
+streamNameLabel StreamStdout = "stdout"
+streamNameLabel StreamStderr = "stderr"
+
+-- Logging ------------------------------------------------------------------
+
 logBridgeEvent :: KernelProcessConfig -> LogLevel -> LogLevel -> Text -> IO ()
 logBridgeEvent cfg threshold level msg =
   if shouldLog level threshold

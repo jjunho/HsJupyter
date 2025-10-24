@@ -93,6 +93,7 @@ test-suite unit
     RuntimeManagerSpec
     SessionStateSpec
     SignatureValidationSpec
+    TelemetrySpec
   default-extensions: OverloadedStrings
   build-depends:
     , aeson
@@ -120,6 +121,7 @@ test-suite integration
     , bytestring
     , hs-jupyter-kernel
     , hspec              >=2.10
+    , network
     , text
     , time
     , zeromq4-haskell

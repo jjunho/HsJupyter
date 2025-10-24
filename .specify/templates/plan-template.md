@@ -31,7 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Documentation-First** — confirm research, spec, data-model, and roadmap updates exist before implementation tasks.
+- **Specification Discipline** — verify `/speckit` prompts and resulting checklists cover the feature scope and are linked in this plan.
+- **Test-First Execution** — ensure the plan enumerates failing tests (unit, integration, docs) that will precede code changes.
+- **Observability & Safety** — outline metrics, logging, diagnostics, and resource guard work that will accompany the feature.
+- **Simplicity & Reproducibility** — state the targeted toolchain (GHC via ghcup), dependency bounds, and any constraints protecting deterministic builds.
 
 ## Project Structure
 

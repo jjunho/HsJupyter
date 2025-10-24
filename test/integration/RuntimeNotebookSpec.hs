@@ -5,6 +5,7 @@ module RuntimeNotebookSpec (spec) where
 import Data.Aeson (object)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time.Clock (secondsToNominalDiffTime)
 import Test.Hspec
 
 import HsJupyter.Runtime.Manager
@@ -183,10 +184,10 @@ spec = describe "Runtime notebook flows" $ do
   describe "resource limit integration" $ do
     it "logs resource limit violations during execution" $ do
       -- Test with a very restricted resource budget
-      let restrictedBudget = ResourceBudget
-            { rbMaxMemoryMB = 1          -- Very low memory limit
-            , rbMaxCpuSeconds = 0.01     -- Very low CPU limit  
-            , rbMaxOutputBytes = 100     -- Very low output limit
+      let restrictedBudget = testResourceBudget
+            { rbCpuTimeout = secondsToNominalDiffTime 0.01
+            , rbMemoryLimit = 1 * 1024 * 1024
+            , rbMaxStreamBytes = 100
             }
       
       withRuntimeManager restrictedBudget 2 $ \manager -> do
@@ -201,10 +202,10 @@ spec = describe "Runtime notebook flows" $ do
         outcomeExecutionCount outcome `shouldBe` 1
 
     it "handles output truncation when limits exceeded" $ do
-      let outputLimitedBudget = ResourceBudget
-            { rbMaxMemoryMB = 512
-            , rbMaxCpuSeconds = 30.0
-            , rbMaxOutputBytes = 50      -- Small output limit
+      let outputLimitedBudget = testResourceBudget
+            { rbCpuTimeout = secondsToNominalDiffTime 30
+            , rbMemoryLimit = 512 * 1024 * 1024
+            , rbMaxStreamBytes = 50
             }
       
       withRuntimeManager outputLimitedBudget 2 $ \manager -> do
@@ -220,10 +221,10 @@ spec = describe "Runtime notebook flows" $ do
           Nothing -> expectationFailure "Expected output value"
 
     it "monitors resource usage patterns across multiple executions" $ do
-      let monitoringBudget = ResourceBudget
-            { rbMaxMemoryMB = 256
-            , rbMaxCpuSeconds = 10.0
-            , rbMaxOutputBytes = 1024
+      let monitoringBudget = testResourceBudget
+            { rbCpuTimeout = secondsToNominalDiffTime 10
+            , rbMemoryLimit = 256 * 1024 * 1024
+            , rbMaxStreamBytes = 1024
             }
       
       withRuntimeManager monitoringBudget 5 $ \manager -> do

@@ -7,7 +7,7 @@ module HsJupyter.KernelProcess
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, cancel)
-import Control.Exception (bracket, try, displayException)
+import Control.Exception (bracket, displayException, try)
 import Control.Monad (forever, when)
 import Data.Aeson (eitherDecodeFileStrict')
 import Data.Int (Int64)
@@ -22,8 +22,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
-import System.Directory (doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory)
 import System.Exit (die)
+import System.FilePath ((</>))
 import qualified System.ZMQ4 as Z
 
 import HsJupyter.Bridge.JupyterBridge
@@ -33,12 +34,6 @@ import HsJupyter.Bridge.JupyterBridge
   , handleInterrupt
   , logBridgeEvent
   , mkBridgeContext
-  )
-import HsJupyter.Runtime.Manager
-  ( withRuntimeManager
-  )
-import HsJupyter.Runtime.SessionState
-  ( ResourceBudget(..)
   )
 import HsJupyter.Bridge.Protocol.Codec
   ( EnvelopeFrameError(..)
@@ -54,6 +49,8 @@ import HsJupyter.Bridge.Protocol.Envelope
   )
 import HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
 import HsJupyter.Kernel.Types
+import HsJupyter.Runtime.Manager (withRuntimeManager)
+import HsJupyter.Runtime.SessionState (ResourceBudget(..))
 
 
 
@@ -91,14 +88,18 @@ loadKernelProcessConfig path overrideLevel = do
 
 -- | Run the kernel within bracketed ZeroMQ sockets while executing the provided action.
 withKernel :: KernelProcessConfig -> IO a -> IO a
-withKernel cfg action = 
-  let resourceBudget = ResourceBudget
-        { rbCpuTimeout = 30  -- 30 seconds
-        , rbMemoryLimit = 1024 * 1024 * 100  -- 100MB
-        , rbTempDirectory = "/tmp"
-        , rbMaxStreamBytes = 1024 * 1024  -- 1MB
+withKernel cfg action = do
+  tempRoot <- getTemporaryDirectory
+  let runtimeTemp = tempRoot </> "hsjupyter"
+  createDirectoryIfMissing True runtimeTemp
+  let budget = ResourceBudget
+        { rbCpuTimeout = 10
+        , rbMemoryLimit = 512 * 1024 * 1024
+        , rbTempDirectory = runtimeTemp
+        , rbMaxStreamBytes = fromIntegral payloadLimitBytes
         }
-  in withRuntimeManager resourceBudget 10 $ \manager ->
+      queueCapacity = 16
+  withRuntimeManager budget queueCapacity $ \manager ->
     Z.withContext $ \ctx ->
       Z.withSocket ctx Z.Router $ \shell ->
       Z.withSocket ctx Z.Router $ \control ->
@@ -189,8 +190,8 @@ controlLoop ctx keyBytes controlSock = forever $ do
     Left (EnvelopeFrameError err) ->
       logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed control frame: " <> err)
     Right envelope -> do
-      let reply = handleInterrupt ctx envelope
-          rendered = renderEnvelopeFrames keyBytes reply
+      reply <- handleInterrupt ctx envelope
+      let rendered = renderEnvelopeFrames keyBytes reply
       sendFrames controlSock rendered
 
 heartbeatLoop :: Z.Socket Z.Rep -> IORef UTCTime -> IO ()
