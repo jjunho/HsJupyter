@@ -2,7 +2,7 @@
 
 module RuntimeNotebookSpec (spec) where
 
-import Data.Aeson (object)
+import Data.Aeson (object, Value(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Test.Hspec
@@ -27,6 +27,14 @@ testExecuteContext msgId = ExecuteContext
   , ecUsername = "test-user"
   , ecParentId = Nothing
   }
+
+-- Helper to extract text value from ExecutionOutcome payload
+outcomeValue :: ExecutionOutcome -> Maybe Text
+outcomeValue outcome = case outcomePayload outcome of
+  [value] -> case value of
+    String txt -> Just txt
+    _ -> Nothing
+  _ -> Nothing
 
 -- Helper to create test metadata
 testJobMetadata :: JobMetadata
@@ -184,9 +192,10 @@ spec = describe "Runtime notebook flows" $ do
     it "logs resource limit violations during execution" $ do
       -- Test with a very restricted resource budget
       let restrictedBudget = ResourceBudget
-            { rbMaxMemoryMB = 1          -- Very low memory limit
-            , rbMaxCpuSeconds = 0.01     -- Very low CPU limit  
-            , rbMaxOutputBytes = 100     -- Very low output limit
+            { rbCpuTimeout = 0.01        -- Very low CPU timeout
+            , rbMemoryLimit = 1024 * 1024 -- 1MB memory limit
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 100     -- Very low output limit
             }
       
       withRuntimeManager restrictedBudget 2 $ \manager -> do
@@ -202,9 +211,10 @@ spec = describe "Runtime notebook flows" $ do
 
     it "handles output truncation when limits exceeded" $ do
       let outputLimitedBudget = ResourceBudget
-            { rbMaxMemoryMB = 512
-            , rbMaxCpuSeconds = 30.0
-            , rbMaxOutputBytes = 50      -- Small output limit
+            { rbCpuTimeout = 30.0        -- 30 second timeout
+            , rbMemoryLimit = 512 * 1024 * 1024  -- 512MB
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 50      -- Small output limit
             }
       
       withRuntimeManager outputLimitedBudget 2 $ \manager -> do
@@ -221,15 +231,16 @@ spec = describe "Runtime notebook flows" $ do
 
     it "monitors resource usage patterns across multiple executions" $ do
       let monitoringBudget = ResourceBudget
-            { rbMaxMemoryMB = 256
-            , rbMaxCpuSeconds = 10.0
-            , rbMaxOutputBytes = 1024
+            { rbCpuTimeout = 10.0        -- 10 second timeout
+            , rbMemoryLimit = 256 * 1024 * 1024  -- 256MB
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 1024    -- 1KB output limit
             }
       
       withRuntimeManager monitoringBudget 5 $ \manager -> do
         -- Execute multiple code snippets to test resource monitoring
-        let contexts = [ testExecuteContext ("monitor-" ++ show i) | i <- [1..3] ]
-        let codes = [ "let x" ++ show i ++ " = " ++ show (i * 10)
+        let contexts = [ testExecuteContext (T.pack ("monitor-" ++ show i)) | i <- [1..3] ]
+        let codes = [ T.pack ("let x" ++ show i ++ " = " ++ show (i * 10))
                     | i <- [1..3] ]
         
         outcomes <- mapM (\(ctx, code) -> submitExecute manager ctx testJobMetadata code) 

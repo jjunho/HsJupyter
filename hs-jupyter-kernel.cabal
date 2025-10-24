@@ -51,6 +51,9 @@ library
     HsJupyter.Runtime.Diagnostics
     HsJupyter.Runtime.EchoRuntime
     HsJupyter.Runtime.Evaluation
+    HsJupyter.Runtime.GHCDiagnostics
+    HsJupyter.Runtime.GHCRuntime
+    HsJupyter.Runtime.GHCSession
     HsJupyter.Runtime.Manager
     HsJupyter.Runtime.ResourceGuard
     HsJupyter.Runtime.SessionState
@@ -87,6 +90,9 @@ test-suite unit
   main-is:        Spec.hs
   other-modules:
     DiagnosticsSpec
+    GHCDiagnosticsSpec
+    GHCRuntimeSpec
+    GHCSessionSpec
     ObservabilitySpec
     ProtocolEnvelopeSpec
     ResourceGuardSpec
@@ -112,6 +118,7 @@ test-suite integration
   main-is:        Spec.hs
   other-modules:
     ExecuteEchoSpec
+    GHCNotebookSpec
     RuntimeNotebookSpec
   default-extensions: OverloadedStrings
   build-depends:
