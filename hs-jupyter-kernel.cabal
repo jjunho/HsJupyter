@@ -48,7 +48,10 @@ library
     HsJupyter.Kernel.Types
     HsJupyter.KernelProcess
     HsJupyter.Router.RequestRouter
+    HsJupyter.Runtime.Diagnostics
     HsJupyter.Runtime.EchoRuntime
+    HsJupyter.Runtime.SessionState
+    HsJupyter.Runtime.Telemetry
 
   hs-source-dirs:     src
   other-modules:

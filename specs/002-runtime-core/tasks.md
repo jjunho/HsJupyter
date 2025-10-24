@@ -22,10 +22,10 @@
 
 **Purpose**: Core types and scaffolding all stories depend on.
 
-- [ ] T003 Create runtime types in `src/HsJupyter/Runtime/SessionState.hs` (`RuntimeSessionState`, `ExecutionJob`, `ExecutionOutcome`, `ResourceBudget`).
-- [ ] T004 [P] Implement diagnostics schema in `src/HsJupyter/Runtime/Diagnostics.hs` with JSON helpers and severity definitions.
-- [ ] T005 [P] Add telemetry helpers in `src/HsJupyter/Runtime/Telemetry.hs` for metrics/logging hooks used across stories.
-- [ ] T006 Introduce runtime namespace exports in `HsJupyter/Kernel/Types.hs` and update plan docs accordingly.
+- [X] T003 Create runtime types in `src/HsJupyter/Runtime/SessionState.hs` (`RuntimeSessionState`, `ExecutionJob`, `ExecutionOutcome`, `ResourceBudget`).
+- [X] T004 [P] Implement diagnostics schema in `src/HsJupyter/Runtime/Diagnostics.hs` with JSON helpers and severity definitions.
+- [X] T005 [P] Add telemetry helpers in `src/HsJupyter/Runtime/Telemetry.hs` for metrics/logging hooks used across stories.
+- [X] T006 Introduce runtime namespace exports in `HsJupyter/Kernel/Types.hs` and update plan docs accordingly.
 
 **Checkpoint**: Session state, diagnostics, telemetry scaffolds exist; runtime manager can compile against new types.
 

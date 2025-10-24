@@ -5,6 +5,9 @@ module HsJupyter.Kernel.Types
   , LoadConfigError(..)
   , summariseConfig
   , shouldLog
+  , module HsJupyter.Runtime.SessionState
+  , module HsJupyter.Runtime.Diagnostics
+  , module HsJupyter.Runtime.Telemetry
   ) where
 
 import qualified Data.ByteString.Char8 as BS
@@ -14,6 +17,10 @@ import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
 import Data.Aeson (FromJSON(..), (.:), (.:?), withObject)
 import Data.Maybe (fromMaybe)
+
+import HsJupyter.Runtime.Diagnostics
+import HsJupyter.Runtime.SessionState
+import HsJupyter.Runtime.Telemetry
 
 -- | Structured log level independent of any particular logging framework.
 data LogLevel
@@ -110,4 +117,3 @@ parseLogLevel (Just txt) = case T.toLower txt of
   "error" -> LogError
   "info"  -> LogInfo
   _        -> LogInfo
-
