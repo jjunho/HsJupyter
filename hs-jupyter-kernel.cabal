@@ -50,6 +50,9 @@ library
     HsJupyter.Router.RequestRouter
     HsJupyter.Runtime.Diagnostics
     HsJupyter.Runtime.EchoRuntime
+    HsJupyter.Runtime.Evaluation
+    HsJupyter.Runtime.Manager
+    HsJupyter.Runtime.ResourceGuard
     HsJupyter.Runtime.SessionState
     HsJupyter.Runtime.Telemetry
 
@@ -83,8 +86,12 @@ test-suite unit
   hs-source-dirs: test/unit
   main-is:        Spec.hs
   other-modules:
+    DiagnosticsSpec
     ObservabilitySpec
     ProtocolEnvelopeSpec
+    ResourceGuardSpec
+    RuntimeManagerSpec
+    SessionStateSpec
     SignatureValidationSpec
   default-extensions: OverloadedStrings
   build-depends:
@@ -105,6 +112,7 @@ test-suite integration
   main-is:        Spec.hs
   other-modules:
     ExecuteEchoSpec
+    RuntimeNotebookSpec
   default-extensions: OverloadedStrings
   build-depends:
     , aeson
