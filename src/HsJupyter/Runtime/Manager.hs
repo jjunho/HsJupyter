@@ -42,6 +42,7 @@ import HsJupyter.Runtime.SessionState
   , ExecutionJob(..)
   , ExecutionOutcome(..)
   , JobMetadata(..)
+  , JobType(..)
   , RuntimeSessionState
   , initialSessionState
   , ResourceBudget(..)
@@ -107,6 +108,7 @@ submit queue cancelMap ctx metadata source = do
         , jobSubmittedAt = submittedAt
         , jobMetadata = metadata
         , jobCancelToken = cancelToken
+        , jobType = EchoJob  -- Default to EchoJob for backward compatibility, GHC support added later
         }
   atomically $ do
     modifyTVar' cancelMap (Map.insert (ecMessageId ctx) cancelToken)
