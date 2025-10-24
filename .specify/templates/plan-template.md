@@ -31,7 +31,14 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+| Gate | Status | Notes |
+|------|--------|-------|
+| Documentation-first: spec and plan must precede implementation | [✅/❌] | [Spec status and notes] |
+| Test-first mindset: define acceptance & soak tests before runtime work | [✅/❌] | [Test scenarios and performance targets status] |
+| Specification-driven development: follow speckit workflow | [✅/❌] | [Current phase and workflow compliance] |
+| Observability foundation: structured logging and diagnostics | [✅/❌] | [Telemetry and monitoring approach] |
+| Modular architecture: maintain HsJupyter.* namespace | [✅/❌] | [Module organization and STM usage] |
+| Simplicity & maintainability: apply DRY, KISS, YAGNI principles | [✅/❌] | [Complexity justification and simplicity approach] |
 
 ## Project Structure
 

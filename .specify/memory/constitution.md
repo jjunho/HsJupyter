@@ -1,50 +1,89 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report:
+- Version change: 1.0.0 → 1.1.0 (added new principle section)
+- Added principles: VI. Simplicity & Maintainability (DRY, KISS, YAGNI)
+- Modified principles: None
+- Added sections: None
+- Removed sections: None
+- Templates requiring updates: ⚠ plan-template.md (add DRY/KISS/YAGNI gate), ⚠ tasks-template.md (add simplicity guidance)
+- Follow-up TODOs: None - all principles implemented
+-->
+
+# HsJupyter Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Documentation-First Development
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Every feature begins with comprehensive documentation in `specs/` before any implementation work. Architecture decisions live in `docs/architecture.md`, roadmap updates in `docs/roadmap.md`, and contributor processes in `docs/developer/`. Specification artifacts (spec.md, plan.md, research.md, data-model.md, contracts/, quickstart.md) MUST be complete and validated before proceeding to task generation. Code reviews reject work that lacks matching documentation or leaves design decisions undocumented.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Test-First Implementation  
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Tests MUST be written before implementation and MUST fail before code is written to make them pass. Mirror the module tree under `test/` with files following the pattern `ModuleNameSpec.hs`. Run `cabal v2-test` before opening any PR. Unit tests for all new modules, integration tests for user-facing features, and golden tests for protocol compatibility are mandatory. Test scenarios from user story acceptance criteria become automated tests.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Specification-Driven Development
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Follow the speckit workflow rigidly: `/speckit.specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement`. Feature branches follow `NNN-feature-name` naming. Each phase (spec, plan, tasks) MUST be complete before proceeding to the next. User stories MUST be prioritized (P1, P2, P3) and independently testable. All acceptance scenarios become test cases.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Observability Foundation
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Structured logging, metrics collection, and diagnostic reporting are mandatory from the earliest phases. Use `katip` for structured JSON logs with correlation IDs. Expose telemetry through the `Runtime/Telemetry.hs` module. Every runtime operation MUST support cancellation via TMVar tokens and resource monitoring via `ResourceGuard`. Error handling MUST use the structured `RuntimeDiagnostic` system with severity classification.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Modular Architecture
+
+Maintain the `HsJupyter.*` namespace with clear module separation: `Bridge/` for protocol integration, `Runtime/` for execution core, `Router/` for message dispatch, `Kernel/` for types. Use STM for thread-safe state management. Prefer total functions over partial functions. Every module MUST have comprehensive Haddock documentation. Follow four-space indentation and descriptive naming conventions.
+
+### VI. Simplicity & Maintainability
+
+Apply DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), and YAGNI (You Aren't Gonna Need It) principles rigorously. Eliminate code duplication through shared utilities and type-safe abstractions. Choose the simplest solution that meets requirements - complex patterns MUST be justified with concrete benefits. Implement only features explicitly required by current user stories; speculative features are forbidden. Refactor ruthlessly to maintain clarity. When complexity is unavoidable, isolate it behind clean interfaces with comprehensive documentation.
+
+## Development Workflow & Quality Gates
+
+### Branching Strategy
+
+Create numbered feature branches (`003-ghc-evaluation`) with meaningful commits in imperative mood. Each commit MUST summarize behavior changes and reference roadmap items. PRs MUST include coverage reports, demo steps, and flag open questions as checklists.
+
+### Quality Standards  
+
+- Haskell code MUST follow project style guidelines (four-space indentation, `HsJupyter.*` namespace)
+- All public APIs MUST have Haddock comments
+- Performance requirements MUST be specified and validated (e.g., <200ms evaluation, <2s startup)
+- Resource constraints MUST be enforced (CPU, memory, output limits)
+- Error scenarios MUST be comprehensively tested
+
+### Implementation Phases
+
+- **Phase 1**: Setup and infrastructure
+- **Phase 2**: Foundational prerequisites (blocking - no user stories until complete)  
+- **Phase 3+**: User stories in priority order (P1, P2, P3)
+- **Final Phase**: Polish, documentation, and cross-cutting concerns
+
+## Technology Standards
+
+### Core Stack
+
+- **Language**: Haskell with GHC 9.12.2+ via ghcup
+- **Concurrency**: STM for state management, TMVar for cancellation
+- **Protocol**: ZeroMQ (`zeromq4-haskell`) for Jupyter integration
+- **JSON**: `aeson` for serialization
+- **Testing**: `hspec` for unit and integration tests
+- **Logging**: `katip` for structured logging
+
+### Performance Targets
+
+- Simple operations: <200ms response time
+- Session initialization: <2 seconds  
+- Memory baseline: <100MB for typical workflows
+- Resource limits: CPU, memory, and output monitoring mandatory
+
+### Integration Requirements
+
+All new features MUST maintain compatibility with existing Phase 1 (Protocol Bridge) and Phase 2 (Runtime Core) infrastructure. Preserve STM-based job queues, TMVar cancellation, ResourceGuard limits, and diagnostic reporting.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other development practices. Amendments require documentation of rationale, approval from maintainers, and a migration plan for affected artifacts. All PRs and code reviews MUST verify compliance with these principles. Complexity that violates principles MUST be explicitly justified with simpler alternatives documented as rejected.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+For runtime development guidance, reference `AGENTS.md` for agent workflow specifics and `.specify/` scripts for tooling usage.
+
+**Version**: 1.1.0 | **Ratified**: 2025-10-25 | **Last Amended**: 2025-10-25
