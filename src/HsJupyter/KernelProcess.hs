@@ -34,6 +34,12 @@ import HsJupyter.Bridge.JupyterBridge
   , logBridgeEvent
   , mkBridgeContext
   )
+import HsJupyter.Runtime.Manager
+  ( withRuntimeManager
+  )
+import HsJupyter.Runtime.SessionState
+  ( ResourceBudget(..)
+  )
 import HsJupyter.Bridge.Protocol.Codec
   ( EnvelopeFrameError(..)
   , parseEnvelopeFrames
@@ -85,32 +91,39 @@ loadKernelProcessConfig path overrideLevel = do
 
 -- | Run the kernel within bracketed ZeroMQ sockets while executing the provided action.
 withKernel :: KernelProcessConfig -> IO a -> IO a
-withKernel cfg action =
-  Z.withContext $ \ctx ->
-    Z.withSocket ctx Z.Router $ \shell ->
-    Z.withSocket ctx Z.Router $ \control ->
-    Z.withSocket ctx Z.Router $ \stdinSock ->
-    Z.withSocket ctx Z.Pub    $ \iopub ->
-    Z.withSocket ctx Z.Rep    $ \heartbeat -> do
-      configureSocket shell
-      configureSocket control
-      configureSocket stdinSock
-      configureSocket iopub
-      configureSocket heartbeat
-      bindAll shell control stdinSock iopub heartbeat
-      bridgeCtx <- mkBridgeContext cfg
-      logBridgeEvent cfg (logLevel cfg) LogInfo "Kernel sockets bound"
-      now <- getCurrentTime
-      lastBeatRef <- newIORef now
-      statusRef <- newIORef Healthy
-      let keyBytes = key cfg
-          loops =
-            [ shellLoop bridgeCtx keyBytes shell iopub
-            , controlLoop bridgeCtx keyBytes control
-            , heartbeatLoop heartbeat lastBeatRef
-            , heartbeatMonitorLoop cfg lastBeatRef statusRef
-            ]
-      bracket (traverse async loops) (mapM_ cancel) $ \_ -> action
+withKernel cfg action = 
+  let resourceBudget = ResourceBudget
+        { rbCpuTimeout = 30  -- 30 seconds
+        , rbMemoryLimit = 1024 * 1024 * 100  -- 100MB
+        , rbTempDirectory = "/tmp"
+        , rbMaxStreamBytes = 1024 * 1024  -- 1MB
+        }
+  in withRuntimeManager resourceBudget 10 $ \manager ->
+    Z.withContext $ \ctx ->
+      Z.withSocket ctx Z.Router $ \shell ->
+      Z.withSocket ctx Z.Router $ \control ->
+      Z.withSocket ctx Z.Router $ \stdinSock ->
+      Z.withSocket ctx Z.Pub    $ \iopub ->
+      Z.withSocket ctx Z.Rep    $ \heartbeat -> do
+        configureSocket shell
+        configureSocket control
+        configureSocket stdinSock
+        configureSocket iopub
+        configureSocket heartbeat
+        bindAll shell control stdinSock iopub heartbeat
+        bridgeCtx <- mkBridgeContext cfg manager
+        logBridgeEvent cfg (logLevel cfg) LogInfo "Kernel sockets bound"
+        now <- getCurrentTime
+        lastBeatRef <- newIORef now
+        statusRef <- newIORef Healthy
+        let keyBytes = key cfg
+            loops =
+              [ shellLoop bridgeCtx keyBytes shell iopub
+              , controlLoop bridgeCtx keyBytes control
+              , heartbeatLoop heartbeat lastBeatRef
+              , heartbeatMonitorLoop cfg lastBeatRef statusRef
+              ]
+        bracket (traverse async loops) (mapM_ cancel) $ \_ -> action
   where
     configureSocket sock = do
       Z.setLinger (Z.restrict (0 :: Int)) sock

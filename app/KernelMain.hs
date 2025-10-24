@@ -39,8 +39,9 @@ optionsParser = Options
 main :: IO ()
 main = do
   opts <- execParser optsInfo
-  envLevel <- traverse parseLogLevel =<< lookupEnv "HSJUPYTER_LOG_LEVEL"
-  let effectiveLevel = optLogLevel opts <|> envLevel
+  envLevelStr <- lookupEnv "HSJUPYTER_LOG_LEVEL"
+  let envLevel = envLevelStr >>= parseLogLevel
+      effectiveLevel = optLogLevel opts <|> envLevel
   eConfig <- loadKernelProcessConfig (optConnection opts) effectiveLevel
   case eConfig of
     Left err -> die (renderError err)

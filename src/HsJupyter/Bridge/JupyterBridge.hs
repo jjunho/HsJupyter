@@ -33,22 +33,25 @@ import HsJupyter.Kernel.Types
   )
 import HsJupyter.Router.RequestRouter
   ( Router
+  , RuntimeExecutionOutcome(..)
+  , RuntimeStreamChunk(..)
   , acknowledgeInterrupt
   , mkRouter
   , routeExecuteRequest
   )
-import HsJupyter.Runtime.EchoRuntime
-  ( EchoRuntime
-  , ExecutionOutcome(..)
-  , StreamChunk(..)
-  , mkRuntime
+import HsJupyter.Runtime.Manager
+  ( RuntimeManager
+  , withRuntimeManager
+  )
+import HsJupyter.Runtime.SessionState
+  ( ResourceBudget(..)
   )
 
 -- | Operational context shared by bridge handlers.
 data BridgeContext = BridgeContext
   { bridgeConfig    :: KernelProcessConfig
   , bridgeRouter    :: Router
-  , bridgeRuntime   :: EchoRuntime
+  , bridgeManager   :: RuntimeManager
   , bridgeRejected  :: IORef Int
   }
 
@@ -58,16 +61,15 @@ data BridgeError
   | DecodeFailure Text
   deriving (Eq, Show)
 
--- | Construct a bridge context from kernel configuration.
-mkBridgeContext :: KernelProcessConfig -> IO BridgeContext
-mkBridgeContext cfg = do
-  runtime <- mkRuntime
+-- | Construct a bridge context from kernel configuration and runtime manager.
+mkBridgeContext :: KernelProcessConfig -> RuntimeManager -> IO BridgeContext
+mkBridgeContext cfg manager = do
   rejectedVar <- newIORef 0
-  let router = mkRouter runtime
+  let router = mkRouter manager
   pure BridgeContext
     { bridgeConfig = cfg
     , bridgeRouter = router
-    , bridgeRuntime = runtime
+    , bridgeManager = manager
     , bridgeRejected = rejectedVar
     }
 
@@ -81,8 +83,7 @@ handleExecuteOnce
   -> ProtocolEnvelope Value
   -> IO (Either BridgeError [ProtocolEnvelope Value])
 handleExecuteOnce ctx envelope = do
-  let _ = bridgeRuntime ctx -- keep runtime alive for future extensions
-      sharedKey = key (bridgeConfig ctx)
+  let sharedKey = key (bridgeConfig ctx)
   if not (verifySignature sharedKey envelope)
     then do
       incrementRejected ctx
@@ -95,18 +96,18 @@ handleExecuteOnce ctx envelope = do
       Just typed -> do
         outcome <- routeExecuteRequest (bridgeRouter ctx) typed
         let replyEnv = toExecuteReply typed (toReply outcome)
-            streamEnvs = makeStreamEnvelope typed <$> outcomeStreams outcome
+            streamEnvs = makeStreamEnvelope typed <$> routerStreams outcome
         logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogDebug
           ("Processed message " <> msgId (envelopeHeader typed))
         pure $ Right (replyEnv : streamEnvs)
   where
     toReply outcome = ExecuteReply
-      { executeReplyCount = outcomeCount outcome
-      , executeReplyStatus = outcomeStatus outcome
-      , executeReplyPayload = [outcomePayload outcome]
+      { executeReplyCount = routerCount outcome
+      , executeReplyStatus = routerStatus outcome
+      , executeReplyPayload = [routerPayload outcome]
       }
 
-    makeStreamEnvelope reqEnv (StreamChunk name chunkText) =
+    makeStreamEnvelope reqEnv (RuntimeStreamChunk name chunkText) =
       let header = (envelopeHeader reqEnv) { msgType = "stream" }
       in ProtocolEnvelope
           { envelopeIdentities = [T.pack "stream"]
