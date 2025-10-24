@@ -7,17 +7,23 @@ module HsJupyter.KernelProcess
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, cancel)
-import Control.Exception (bracket)
-import Control.Monad (forever)
+import Control.Exception (bracket, try, displayException)
+import Control.Monad (forever, when)
 import Data.Aeson (eitherDecodeFileStrict')
+import Data.Int (Int64)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (getCurrentTime)
+import qualified Data.Text.Encoding as TE
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import System.Directory (doesFileExist)
+import System.Exit (die)
 import qualified System.ZMQ4 as Z
 
 import HsJupyter.Bridge.JupyterBridge
@@ -33,6 +39,14 @@ import HsJupyter.Bridge.Protocol.Codec
   , parseEnvelopeFrames
   , renderEnvelopeFrames
   )
+import HsJupyter.Bridge.Protocol.Envelope
+  ( ProtocolEnvelope(..)
+  , MessageHeader(..)
+  , envelopeContent
+  , envelopeHeader
+  , msgType
+  )
+import HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
 import HsJupyter.Kernel.Types
 
 
@@ -86,11 +100,15 @@ withKernel cfg action =
       bindAll shell control stdinSock iopub heartbeat
       bridgeCtx <- mkBridgeContext cfg
       logBridgeEvent cfg (logLevel cfg) LogInfo "Kernel sockets bound"
+      now <- getCurrentTime
+      lastBeatRef <- newIORef now
+      statusRef <- newIORef Healthy
       let keyBytes = key cfg
           loops =
             [ shellLoop bridgeCtx keyBytes shell iopub
             , controlLoop bridgeCtx keyBytes control
-            , heartbeatLoop heartbeat
+            , heartbeatLoop heartbeat lastBeatRef
+            , heartbeatMonitorLoop cfg lastBeatRef statusRef
             ]
       bracket (traverse async loops) (mapM_ cancel) $ \_ -> action
   where
@@ -99,13 +117,22 @@ withKernel cfg action =
       pure ()
 
     bindAll shell control stdinSock iopub heartbeat = do
-      Z.bind shell     (endpoint (shellPort cfg))
-      Z.bind control   (endpoint (controlPort cfg))
-      Z.bind stdinSock (endpoint (stdinPort cfg))
-      Z.bind iopub     (endpoint (iopubPort cfg))
-      Z.bind heartbeat (endpoint (heartbeatPort cfg))
+      bindOrDie "shell"     shell     (endpoint (shellPort cfg))
+      bindOrDie "control"   control   (endpoint (controlPort cfg))
+      bindOrDie "stdin"     stdinSock (endpoint (stdinPort cfg))
+      bindOrDie "iopub"     iopub     (endpoint (iopubPort cfg))
+      bindOrDie "heartbeat" heartbeat (endpoint (heartbeatPort cfg))
 
     endpoint port = T.unpack (transport cfg) <> "://" <> T.unpack (ipAddress cfg) <> ":" <> show port
+
+    bindOrDie label sock ep = do
+      result <- (try (Z.bind sock ep) :: IO (Either Z.ZMQError ()))
+      case result of
+        Right _ -> pure ()
+        Left err -> do
+          let detail = "[hsjupyter] failed to bind " <> label <> " socket at " <> ep <> " : " <> displayException err
+          putStrLn detail
+          die "[hsjupyter] kernel startup aborted"
 
 -- | Run the kernel loops indefinitely (CTRL+C to exit).
 runKernel :: KernelProcessConfig -> IO ()
@@ -120,6 +147,10 @@ shellLoop ctx keyBytes shellSock iopubSock = forever $ do
     Left (EnvelopeFrameError err) ->
       logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed shell frame: " <> err)
     Right envelope -> do
+      let payloadBytes = LBS.length (Aeson.encode (envelopeContent envelope))
+      when (payloadBytes > payloadLimitBytes) $
+        logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn
+          ("Received execute_request payload exceeding 1MB (" <> T.pack (show payloadBytes) <> " bytes)")
       result <- handleExecuteOnce ctx envelope
       case result of
         Left bridgeErr ->
@@ -131,8 +162,13 @@ shellLoop ctx keyBytes shellSock iopubSock = forever $ do
               then sendFrames shellSock rendered
               else sendIOPub env rendered
   where
-    sendIOPub _env rendered = sendFrames iopubSock rendered
+    sendIOPub env rendered =
+      let topic = TE.encodeUtf8 (msgType (envelopeHeader env))
+      in sendFrames iopubSock (topic : rendered)
 
+
+payloadLimitBytes :: Int64
+payloadLimitBytes = 1024 * 1024
 controlLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> IO ()
 controlLoop ctx keyBytes controlSock = forever $ do
   frames <- Z.receiveMulti controlSock
@@ -144,10 +180,44 @@ controlLoop ctx keyBytes controlSock = forever $ do
           rendered = renderEnvelopeFrames keyBytes reply
       sendFrames controlSock rendered
 
-heartbeatLoop :: Z.Socket Z.Rep -> IO ()
-heartbeatLoop heartbeatSock = forever $ do
+heartbeatLoop :: Z.Socket Z.Rep -> IORef UTCTime -> IO ()
+heartbeatLoop heartbeatSock lastBeatRef = forever $ do
   msg <- Z.receive heartbeatSock
   Z.send heartbeatSock [] msg
+  now <- getCurrentTime
+  writeIORef lastBeatRef now
+
+heartbeatMonitorLoop :: KernelProcessConfig -> IORef UTCTime -> IORef HeartbeatStatus -> IO ()
+heartbeatMonitorLoop cfg lastBeatRef statusRef = forever $ do
+  threadDelay heartbeatPollInterval
+  lastBeat <- readIORef lastBeatRef
+  now <- getCurrentTime
+  let latency = diffUTCTime now lastBeat
+      newStatus = classify latency
+  currentStatus <- readIORef statusRef
+  when (newStatus /= currentStatus) $ do
+    writeIORef statusRef newStatus
+    logBridgeEvent cfg (logLevel cfg) (statusLevel newStatus) (statusMessage latency newStatus)
+  where
+    classify dt
+      | dt < healthyThreshold      = Healthy
+      | dt < unresponsiveThreshold = Degraded
+      | otherwise                  = Unresponsive
+
+    statusLevel Healthy      = LogInfo
+    statusLevel Degraded     = LogWarn
+    statusLevel Unresponsive = LogError
+
+    statusMessage dt Healthy      = "Heartbeat healthy (latency " <> T.pack (show dt) <> ")"
+    statusMessage dt Degraded     = "Heartbeat degraded (last probe " <> T.pack (show dt) <> "s ago)"
+    statusMessage dt Unresponsive = "Heartbeat unresponsive (last probe " <> T.pack (show dt) <> "s ago)"
+
+healthyThreshold, unresponsiveThreshold :: NominalDiffTime
+healthyThreshold = 0.5
+unresponsiveThreshold = 5.0
+
+heartbeatPollInterval :: Int
+heartbeatPollInterval = 500 * 1000 -- microseconds
 
 sendFrames :: Z.Sender a => Z.Socket a -> [BS.ByteString] -> IO ()
 sendFrames sock frames =
@@ -158,4 +228,3 @@ sendFrames sock frames =
 bridgeErrorMessage :: BridgeError -> Text
 bridgeErrorMessage SignatureValidationFailed = "Rejected: signature validation failed"
 bridgeErrorMessage (DecodeFailure msg)        = "Rejected: " <> msg
-
