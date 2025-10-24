@@ -23,3 +23,9 @@ This guide will help contributors understand the project structure, development 
    - Release checklist for maintainers
 
 > TODO: Replace this outline with concrete instructions as the implementation and tooling solidify.
+
+## Phase 1 Kernel Prototype Notes
+
+- Run `cabal v2-run hs-jupyter-kernel -- --connection scripts/demo/sample-connection.json --log-level Debug` to bind the ROUTER/PUB/REP sockets for the echo prototype.
+- Set `HSJUPYTER_LOG_LEVEL` to override the default log level when CLI flags are omitted.
+- `scripts/demo/phase1_echo_notebook.py` now uses pyzmq to send a signed `execute_request`, prints the resulting `execute_reply`, and checks the heartbeat channel.

@@ -20,8 +20,6 @@ The same pipeline handles control messages (interrupt, shutdown) and capability-
 - Upstream changelog and release notes for `jupyter_client`: <https://github.com/jupyter/jupyter_client/releases>
 - Contribution and security policies for upstream client: <https://github.com/jupyter/jupyter_client/blob/main/CONTRIBUTING.md>, <https://github.com/jupyter/jupyter_client/blob/main/SECURITY.md>
 
-These resources replace the previously vendored `jupyter/` tree and serve as the authoritative references while implementing the bridge and runtime layers.
-
 ## Core Components
 
 ### KernelProcess
@@ -33,6 +31,7 @@ These resources replace the previously vendored `jupyter/` tree and serve as the
 ### JupyterBridge
 
 - Owns ZeroMQ sockets for shell, iopub, control, stdin channels.
+- Prototype module lives at `src/HsJupyter/Bridge/JupyterBridge.hs`, binding ZeroMQ sockets, verifying HMAC signatures, and translating multipart frames into typed envelopes for the Phase 1 echo runtime.
 - Provides codec layer (`HsJupyter.Protocol.JSON`) with typed message records, avoiding ad-hoc JSON handling.
 - Validates signatures, message order, and routing metadata before passing requests to the router.
 - Serialises replies/outputs from typed data back into Jupyter wire format.

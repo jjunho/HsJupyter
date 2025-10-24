@@ -4,7 +4,7 @@ This living checklist captures the near-term implementation tasks derived from t
 
 ## In Progress
 
-- [ ] Prototype `KernelProcess` and `JupyterBridge` handshake (ZeroMQ message round-trip)
+- [x] Prototype `KernelProcess` and `JupyterBridge` handshake (ZeroMQ message round-trip) - see `specs/001-protocol-bridge/plan.md` quickstart demo.
 - [ ] Stand up persistent `RuntimeManager` with streaming stdout/stderr
 - [ ] Design CLI skeleton for `hsjupyter install` (argument parsing, dry-run flow)
 
@@ -24,3 +24,9 @@ This living checklist captures the near-term implementation tasks derived from t
 - Performance trends: record metrics in `docs/performance/`
 
 > TODO: Once an issue tracker is available, mirror these items as issues/epics for richer tracking.
+
+### Release Notes Snippet
+
+- Phase 1 protocol bridge prototype available via `cabal v2-run hs-jupyter-kernel`.
+- Echo runtime returns deterministic streams for demo validation.
+- Guardrail tests validate HMAC signature checking ahead of ZeroMQ wiring.

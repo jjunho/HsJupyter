@@ -1,0 +1,131 @@
+asyncapi: "2.6.0"
+info:
+  title: Phase 1 Execute Echo Contract
+  version: "1.0.0"
+  description: >-
+    Defines the message exchange for the execute echo flow between nbclient and
+    the Phase 1 HsJupyter kernel. The kernel must echo source code, stream stdout,
+    and return an execute_reply with status ok when the runtime stub succeeds.
+channels:
+  shell/execute_request:
+    description: Requests sent from nbclient to the kernel shell socket.
+    publish:
+      summary: Client submits code for execution.
+      message:
+        name: ExecuteRequest
+        payload:
+          type: object
+          required: [code, silent]
+          properties:
+            code:
+              type: string
+              description: Source code to execute; echoed in ExecuteResult payload.
+            silent:
+              type: boolean
+              default: false
+            store_history:
+              type: boolean
+              default: true
+            user_expressions:
+              type: object
+              additionalProperties: true
+            allow_stdin:
+              type: boolean
+              default: false
+  iopub/stream:
+    description: Stream messages emitted while execution runs.
+    subscribe:
+      summary: Kernel publishes mirrored stdout.
+      message:
+        name: StreamOutput
+        payload:
+          type: object
+          required: [name, text]
+          properties:
+            name:
+              type: string
+              enum: [stdout, stderr]
+            text:
+              type: string
+  shell/execute_reply:
+    description: Final reply for execute_request.
+    subscribe:
+      summary: Kernel completion notification.
+      message:
+        name: ExecuteReply
+        payload:
+          type: object
+          required: [status, execution_count]
+          properties:
+            status:
+              type: string
+              enum: [ok, error]
+            execution_count:
+              type: integer
+            payload:
+              type: array
+              items: {}
+            user_expressions:
+              type: object
+              additionalProperties: true
+  control/interrupt_request:
+    description: Interrupts sent to kernel control channel.
+    publish:
+      summary: Client requests execution cancel.
+      message:
+        name: InterruptRequest
+        payload:
+          type: object
+          additionalProperties: false
+  control/interrupt_reply:
+    description: Acknowledgement of interrupt.
+    subscribe:
+      summary: Kernel confirms interrupt handling without killing process.
+      message:
+        name: InterruptReply
+        payload:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [ok]
+operations:
+  executeEcho:
+    action: receive
+    channel: shell/execute_request
+    reply:
+      channel: shell/execute_reply
+      format: application/json
+    traits:
+      - operationId: executeEcho
+        summary: Echo execute flow for Phase 1 stub runtime.
+  interrupt:
+    action: receive
+    channel: control/interrupt_request
+    reply:
+      channel: control/interrupt_reply
+      traits:
+        - operationId: interrupt
+components:
+  messageTraits:
+    signedEnvelope:
+      headers:
+        type: object
+        required: [hmac]
+        properties:
+          hmac:
+            type: string
+            description: Hex digest computed over message frames using connection key.
+  messages:
+    HmacFailure:
+      name: HmacFailure
+      payload:
+        type: object
+        required: [reason]
+        properties:
+          reason:
+            type: string
+            enum:
+              - invalid_signature
+              - missing_signature
+      description: Logged when bridge rejects an unsigned or malformed envelope.
