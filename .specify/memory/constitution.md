@@ -1,64 +1,89 @@
 <!--
-Sync Impact Report
-Version: 0.0.0 → 1.0.0
-Modified Principles:
-- Principle I → Documentation-First Planning
-- Principle II → Specification Discipline
-- Principle III → Test-First Execution
-- Principle IV → Observability & Safety
-- Principle V → Simplicity & Reproducibility
-Added Sections:
-- Additional Constraints
-- Development Workflow & Quality Gates
-Removed Sections:
-- None
-Templates:
-- .specify/templates/plan-template.md ✅ updated
-- .specify/templates/spec-template.md ✅ updated
-- .specify/templates/tasks-template.md ✅ updated
-Follow-ups:
-- None
+Sync Impact Report:
+- Version change: 1.0.0 → 1.1.0 (added new principle section)
+- Added principles: VI. Simplicity & Maintainability (DRY, KISS, YAGNI)
+- Modified principles: None
+- Added sections: None
+- Removed sections: None
+- Templates requiring updates: ⚠ plan-template.md (add DRY/KISS/YAGNI gate), ⚠ tasks-template.md (add simplicity guidance)
+- Follow-up TODOs: None - all principles implemented
 -->
 
 # HsJupyter Constitution
 
 ## Core Principles
 
-### I. Documentation-First Planning
-Every feature must begin with documented research, specs, data models, and roadmap updates in `specs/<phase>/`. Code reviews reject work that lacks matching documentation or leaves diagrams unchecked. Docs stay authoritative—when behaviour changes, update the spec before or alongside implementation.
+### I. Documentation-First Development
 
-### II. Specification Discipline
-Agents MUST execute the `.codex/prompts/speckit.*` guides before running `/speckit` commands and keep generated plans, tasks, and checklists in sync with the implementation status. Feature branches follow `NNN-slug` naming and update the corresponding `specs/<phase>/tasks.md` as validation gates move.
+Every feature begins with comprehensive documentation in `specs/` before any implementation work. Architecture decisions live in `docs/architecture.md`, roadmap updates in `docs/roadmap.md`, and contributor processes in `docs/developer/`. Specification artifacts (spec.md, plan.md, research.md, data-model.md, contracts/, quickstart.md) MUST be complete and validated before proceeding to task generation. Code reviews reject work that lacks matching documentation or leaves design decisions undocumented.
 
-### III. Test-First Execution
-Tests lead every change: write or extend unit, integration, and documentation tests so they fail before code passes. The full suite (`cabal v2-test`, integration notebooks, `markdownlint`) MUST run locally prior to review, with repro steps captured for any temporary gaps.
+### II. Test-First Implementation  
 
-### IV. Observability & Safety
-Structured logging, diagnostics, telemetry, and resource guards are non-negotiable. New runtime behaviour MUST declare metrics, log fields, and safety limits; cancellation and error paths must be exercised in tests. Instrumentation belongs in the same PR as the behaviour it observes.
+Tests MUST be written before implementation and MUST fail before code is written to make them pass. Mirror the module tree under `test/` with files following the pattern `ModuleNameSpec.hs`. Run `cabal v2-test` before opening any PR. Unit tests for all new modules, integration tests for user-facing features, and golden tests for protocol compatibility are mandatory. Test scenarios from user story acceptance criteria become automated tests.
 
-### V. Simplicity & Reproducibility
-Prefer minimal, composable solutions adhering to DRY/KISS/YAGNI. Use the ghcup-managed GHC toolchain and pinned Cabal configuration to keep builds deterministic. New dependencies or architectural complexity require documented justification in specs and plans.
+### III. Specification-Driven Development
 
-## Additional Constraints
+Follow the speckit workflow rigidly: `/speckit.specify` → `/speckit.plan` → `/speckit.tasks` → `/speckit.implement`. Feature branches follow `NNN-feature-name` naming. Each phase (spec, plan, tasks) MUST be complete before proceeding to the next. User stories MUST be prioritized (P1, P2, P3) and independently testable. All acceptance scenarios become test cases.
 
-- Tooling: Use `ghcup install ghc 9.6.4 cabal` and document any extra flags or scripts in the PR.
-- Scripts: Place prototypes under `.specify/scripts/` with executable bits and usage notes; keep automation assets in `.specify/` synced with specs.
-- Branch Hygiene: Keep feature branches focused; rebase or merge only after specs/tests reflect the current state.
-- Documentation QoS: Run `markdownlint docs/**/*.md README.md` and ensure diagrams or tables change with their narrative.
+### IV. Observability Foundation
+
+Structured logging, metrics collection, and diagnostic reporting are mandatory from the earliest phases. Use `katip` for structured JSON logs with correlation IDs. Expose telemetry through the `Runtime/Telemetry.hs` module. Every runtime operation MUST support cancellation via TMVar tokens and resource monitoring via `ResourceGuard`. Error handling MUST use the structured `RuntimeDiagnostic` system with severity classification.
+
+### V. Modular Architecture
+
+Maintain the `HsJupyter.*` namespace with clear module separation: `Bridge/` for protocol integration, `Runtime/` for execution core, `Router/` for message dispatch, `Kernel/` for types. Use STM for thread-safe state management. Prefer total functions over partial functions. Every module MUST have comprehensive Haddock documentation. Follow four-space indentation and descriptive naming conventions.
+
+### VI. Simplicity & Maintainability
+
+Apply DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), and YAGNI (You Aren't Gonna Need It) principles rigorously. Eliminate code duplication through shared utilities and type-safe abstractions. Choose the simplest solution that meets requirements - complex patterns MUST be justified with concrete benefits. Implement only features explicitly required by current user stories; speculative features are forbidden. Refactor ruthlessly to maintain clarity. When complexity is unavoidable, isolate it behind clean interfaces with comprehensive documentation.
 
 ## Development Workflow & Quality Gates
 
-1. Phase 0 research → summarize findings in `specs/<phase>/research.md`.
-2. Phase 1 design → update `plan.md`, `data-model.md`, `quickstart.md`, and contracts.
-3. Run `/speckit.tasks` once design artefacts are complete; keep task checklists in lockstep with implementation.
-4. For each user story: write failing tests, implement behaviour, add telemetry, update docs.
-5. Before merge: rerun full test + lint suite, update specs/tasks, note outstanding TODOs as tracked checklist items.
+### Branching Strategy
+
+Create numbered feature branches (`003-ghc-evaluation`) with meaningful commits in imperative mood. Each commit MUST summarize behavior changes and reference roadmap items. PRs MUST include coverage reports, demo steps, and flag open questions as checklists.
+
+### Quality Standards  
+
+- Haskell code MUST follow project style guidelines (four-space indentation, `HsJupyter.*` namespace)
+- All public APIs MUST have Haddock comments
+- Performance requirements MUST be specified and validated (e.g., <200ms evaluation, <2s startup)
+- Resource constraints MUST be enforced (CPU, memory, output limits)
+- Error scenarios MUST be comprehensively tested
+
+### Implementation Phases
+
+- **Phase 1**: Setup and infrastructure
+- **Phase 2**: Foundational prerequisites (blocking - no user stories until complete)  
+- **Phase 3+**: User stories in priority order (P1, P2, P3)
+- **Final Phase**: Polish, documentation, and cross-cutting concerns
+
+## Technology Standards
+
+### Core Stack
+
+- **Language**: Haskell with GHC 9.12.2+ via ghcup
+- **Concurrency**: STM for state management, TMVar for cancellation
+- **Protocol**: ZeroMQ (`zeromq4-haskell`) for Jupyter integration
+- **JSON**: `aeson` for serialization
+- **Testing**: `hspec` for unit and integration tests
+- **Logging**: `katip` for structured logging
+
+### Performance Targets
+
+- Simple operations: <200ms response time
+- Session initialization: <2 seconds  
+- Memory baseline: <100MB for typical workflows
+- Resource limits: CPU, memory, and output monitoring mandatory
+
+### Integration Requirements
+
+All new features MUST maintain compatibility with existing Phase 1 (Protocol Bridge) and Phase 2 (Runtime Core) infrastructure. Preserve STM-based job queues, TMVar cancellation, ResourceGuard limits, and diagnostic reporting.
 
 ## Governance
 
-- Amendments require consensus in review plus simultaneous updates to affected templates and specs.
-- Versioning follows semantic rules: MAJOR for principle changes, MINOR for new principles/sections, PATCH for clarifications.
-- Compliance is verified during plan (Constitution Check), code review, and release readiness; violations must be documented in the plan’s complexity log with mitigation.
-- Store Sync Impact Reports at the top of this file for traceability.
+This constitution supersedes all other development practices. Amendments require documentation of rationale, approval from maintainers, and a migration plan for affected artifacts. All PRs and code reviews MUST verify compliance with these principles. Complexity that violates principles MUST be explicitly justified with simpler alternatives documented as rejected.
 
-**Version**: 1.0.0 | **Ratified**: 2025-10-24 | **Last Amended**: 2025-10-24
+For runtime development guidance, reference `AGENTS.md` for agent workflow specifics and `.specify/` scripts for tooling usage.
+
+**Version**: 1.1.0 | **Ratified**: 2025-10-25 | **Last Amended**: 2025-10-25

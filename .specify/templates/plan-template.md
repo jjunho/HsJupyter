@@ -31,11 +31,14 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Documentation-First** — confirm research, spec, data-model, and roadmap updates exist before implementation tasks.
-- **Specification Discipline** — verify `/speckit` prompts and resulting checklists cover the feature scope and are linked in this plan.
-- **Test-First Execution** — ensure the plan enumerates failing tests (unit, integration, docs) that will precede code changes.
-- **Observability & Safety** — outline metrics, logging, diagnostics, and resource guard work that will accompany the feature.
-- **Simplicity & Reproducibility** — state the targeted toolchain (GHC via ghcup), dependency bounds, and any constraints protecting deterministic builds.
+| Gate | Status | Notes |
+|------|--------|-------|
+| Documentation-first: spec and plan must precede implementation | [✅/❌] | [Spec status and notes] |
+| Test-first mindset: define acceptance & soak tests before runtime work | [✅/❌] | [Test scenarios and performance targets status] |
+| Specification-driven development: follow speckit workflow | [✅/❌] | [Current phase and workflow compliance] |
+| Observability foundation: structured logging and diagnostics | [✅/❌] | [Telemetry and monitoring approach] |
+| Modular architecture: maintain HsJupyter.* namespace | [✅/❌] | [Module organization and STM usage] |
+| Simplicity & maintainability: apply DRY, KISS, YAGNI principles | [✅/❌] | [Complexity justification and simplicity approach] |
 
 ## Project Structure
 

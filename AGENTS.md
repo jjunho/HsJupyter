@@ -2,28 +2,36 @@
 
 ## Project Structure & Module Organization
 
-HsJupyter is documentation-first. Use `docs/architecture.md`, `docs/roadmap.md`, and `docs/developer/` to capture design decisions and contributor process updates. Stage implementation sketches on `NNN-slug` branches mirroring components (`KernelProcess`, `JupyterBridge`, `RuntimeManager`) to keep the eventual `src/` tree predictable. Place production Haskell modules under `src/HsJupyter/`, mirror tests in `test/`, and keep prototype scripts in `.specify/scripts/` with executable bits set. Specification artefacts for each phase live in `specs/`, where folders like `001-protocol-bridge` and `002-runtime-core` hold spec, plan, and task files that stay aligned with implementation.
+HsJupyter is documentation-first while the kernel takes shape. Keep architecture decisions in `docs/architecture.md`, roadmap updates in `docs/roadmap.md`, and contributor process notes in `docs/developer/`. When adding implementation drafts, stage them under clearly named branches and mirror the planned components (`KernelProcess`, `JupyterBridge`, `RuntimeManager`) so the eventual `src/` tree remains predictable. Update diagrams or reference tables alongside the written guidance they support.
 
 ## Build, Test, and Development Commands
 
-Install GHC 9.6.4 and Cabal via `ghcup` (e.g. `ghcup install ghc 9.6.4 cabal`). Use `cabal v2-build` for compilation, `cabal v2-repl` for interactive sketches, and run `cabal v2-test` before sending changes. Lint docs with `markdownlint docs/**/*.md README.md`. Prototype runners live under `.specify/scripts/` and should be invoked from repo root (e.g. `.specify/scripts/dev-kernel.sh --json`).
+Use a GHC toolchain installed via `ghcup` (`ghcup install ghc 9.6.4 cabal`) before standing up prototypes. Build emerging packages with `cabal v2-build` or `cabal v2-repl` and record any extra flags in your PR. Run documentation checks locally—`markdownlint docs/**/*.md README.md`—to keep the published guides consistent. Prototype scripts (e.g., ZeroMQ harnesses) should live under `.specify/scripts/` with executable bits set (`chmod +x .specify/scripts/dev-kernel.sh`) and usage documented.
 
 ## Coding Style & Naming Conventions
 
-Indent Haskell with four spaces and keep every module under the `HsJupyter.*` namespace. Prefer descriptive singular record types (`KernelProcessConfig`) and camel-cased constructors. Lean on pure, total functions; add brief Haddock comments for non-obvious control flow or bridging logic. If you introduce formatting tooling, document the choice in the same change set.
+Follow four-space indentation for Haskell and keep modules under the `HsJupyter.*` namespace. Prefer descriptive, singular record names (`KernelProcessConfig`) and camel-cased constructors. Rely on total, pure functions where possible, and annotate tricky sections with brief Haddock comments. Document formatting choices in the same PR if you introduce new tooling.
 
 ## Testing Guidelines
 
-Adopt `hspec` suites that mirror the module tree (`test/RequestRouterSpec.hs`, etc.). Provide deterministic repro steps for interim prototypes and add expected output snippets. When runtime behaviour evolves, extend tests first, then wire the matching implementation. Capture coverage notes or log excerpts when CI is unavailable.
+Adopt `hspec` suites once runtime code lands; mirror the module tree under `test/` with files like `RequestRouterSpec.hs`. Run `cabal v2-test` before opening a PR and attach coverage or sample output when CI is unavailable. For interim prototypes, include deterministic repro steps (`scripts/dev-kernel.sh --json`) and expected responses in the PR description.
 
 ## Commit & Pull Request Guidelines
 
-Write imperative commit subjects (`Add runtime manager sketch`) with bodies focused on rationale, follow-ups, or doc impacts. Reference roadmap checklist entries in `docs/roadmap.md` and link related issues. PRs should outline behavioural changes, enumerate documentation updates, and attach screenshots, logs, or command transcripts for user-visible work. Track open questions as Markdown checklists so reviewers can respond explicitly.
+Write commit subjects in the imperative mood (`Add runtime manager sketch`) and keep bodies focused on rationale or follow-ups. Reference roadmap checklist items (see `docs/roadmap.md`) or related issues directly in the PR. Each PR should summarise behaviour changes, list any doc updates, and include screenshots or logs for user-visible work. Flag open questions or future tasks as Markdown checklists so reviewers can track them.
 
 ## Agent Workflow & Prompt Usage
 
-Codex agents must review the Specify prompts in `.codex/prompts/` before invoking `/speckit`. Execute helper scripts from the repo root, keep generated checklists current, and sync results with the relevant `specs/` tasks before moving phases.
+Codex agents must follow the Specify toolkit prompts before running `/speckit` commands: review the matching files in `.codex/prompts/` (`speckit.specify.md`, `speckit.plan.md`, `speckit.tasks.md`, `speckit.implement.md`) and apply their checklists verbatim. Always invoke the helper scripts under `.specify/scripts/bash/` from the repo root with the documented flags, keep feature branches numbered (`001-name`), and update generated checklists when validation status changes.
 
-## Specification Assets
+## Active Technologies
+- Haskell with GHC 9.12.2 via ghcup + hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm (003-ghc-evaluation)
+- In-memory interpreter state (hint InterpreterT monad) (003-ghc-evaluation)
 
-Treat `.specify/` as the automation workspace: `templates/` holds authoring scaffolds, `scripts/` houses helper binaries, and `memory/` stores constitution notes. When advancing roadmap work, update the matching `specs/<phase>/tasks.md` entries alongside code changes and regenerate any `.specify` checklists or plans that track their completion.
+- Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging (001-protocol-bridge)
+- Python helper script powered by `pyzmq` for local execute demos (001-protocol-bridge)
+- N/A (in-memory runtime stub only) (001-protocol-bridge)
+
+## Recent Changes
+
+- 001-protocol-bridge: Added Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging

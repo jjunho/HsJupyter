@@ -252,3 +252,11 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
+
+## Constitution Guidance
+
+Follow HsJupyter Constitution v1.1.0 Principle VI: Simplicity & Maintainability
+
+- Apply DRY (Don't Repeat Yourself): Eliminate code duplication through abstractions
+- Follow KISS (Keep It Simple, Stupid): Choose simplest solution that solves problem
+- Practice YAGNI (You Aren't Gonna Need It): Build only what specification requires
