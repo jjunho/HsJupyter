@@ -21,15 +21,19 @@ common project-settings
     , base                  >=4.14 && <5
     , bytestring
     , containers
+    , exceptions
     , cryptonite
     , directory
     , filepath
     , zeromq4-haskell
+    , ghc
+    , hint
     , mtl
     , random
     , stm
     , text
     , time
+    , temporary
     , transformers
     , unordered-containers
     , uuid

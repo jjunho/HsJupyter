@@ -3,6 +3,8 @@
 /.cabal-sandbox/
 /cabal.project.local
 /.ghc.environment.*
+.ghci
+.ghci-tmp/
 /.vs/
 /.idea/
 /.vscode/
