@@ -18,7 +18,7 @@ module HsJupyter.Runtime.GHCDiagnostics
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Language.Haskell.Interpreter (InterpreterError(..))
+import Language.Haskell.Interpreter (InterpreterError(..), GhcError(..))
 
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic(..), DiagnosticSeverity(..), mkDiagnostic)
 
@@ -52,11 +52,37 @@ data SourceLocation = SourceLocation
 -- | Convert hint InterpreterError to GHCError
 interpretError :: InterpreterError -> GHCError
 interpretError err = case err of
-  UnknownError msg -> RuntimeError (T.pack msg)
+  UnknownError msg -> classifyError (T.pack msg)
+  WontCompile ghcErrors -> 
+    -- Take the first GHC error and convert it
+    case ghcErrors of
+      [] -> CompilationError "Unknown compilation error" defaultLocation []
+      (firstErr:_) -> classifyGhcError firstErr
   NotAllowed msg -> SecurityError (T.pack msg)
-  GhcException msg -> CompilationError (T.pack msg) defaultLocation []
+  GhcException msg -> classifyError (T.pack msg)
   where
     defaultLocation = SourceLocation 1 1 Nothing
+    
+    -- Convert a GhcError from hint to our GHCError
+    classifyGhcError (GhcError errorText) = 
+      let errorMsg = T.pack errorText
+      in classifyError errorMsg
+    
+    -- Classify error based on message content
+    classifyError msg
+      | isTypeError msg = CompilationError msg defaultLocation (generateTypeSuggestions msg)
+      | isSyntaxError msg = CompilationError msg defaultLocation (generateSyntaxSuggestions msg)  
+      | isNameError msg = CompilationError msg defaultLocation (generateNameSuggestions msg)
+      | otherwise = RuntimeError msg
+    
+    isTypeError msg = any (`T.isInfixOf` T.toLower msg) 
+      ["couldn't match expected type", "couldn't match type", "no instance for", "type mismatch"]
+    
+    isSyntaxError msg = any (`T.isInfixOf` T.toLower msg)
+      ["parse error", "syntax error", "unexpected", "missing"]
+      
+    isNameError msg = any (`T.isInfixOf` T.toLower msg)
+      ["not in scope", "variable not in scope", "not defined"]
 
 -- | Convert GHCError to RuntimeDiagnostic for Phase 2 integration
 ghcErrorToDiagnostic :: GHCError -> RuntimeDiagnostic
@@ -98,3 +124,26 @@ commonErrorSuggestions msg
   | "parse error" `T.isInfixOf` T.toLower msg =
       ["Check syntax", "Balance parentheses", "Check indentation"]
   | otherwise = ["Check Haskell syntax", "Review error message carefully"]
+
+-- | Generate suggestions for type errors
+generateTypeSuggestions :: Text -> [Text]
+generateTypeSuggestions msg
+  | "Char" `T.isInfixOf` msg && "String" `T.isInfixOf` msg =
+      ["Use single quotes for Char: 'a'", "Use double quotes for String: \"hello\""]
+  | "Integer" `T.isInfixOf` msg && "Int" `T.isInfixOf` msg =
+      ["Try using fromInteger or fromIntegral for numeric conversion"]
+  | otherwise = commonErrorSuggestions msg
+
+-- | Generate suggestions for syntax errors  
+generateSyntaxSuggestions :: Text -> [Text]
+generateSyntaxSuggestions msg
+  | "unexpected" `T.isInfixOf` T.toLower msg =
+      ["Check for missing operators", "Verify parentheses balance", "Check function application"]
+  | otherwise = commonErrorSuggestions msg
+
+-- | Generate suggestions for name/scope errors
+generateNameSuggestions :: Text -> [Text]
+generateNameSuggestions msg
+  | "not in scope" `T.isInfixOf` T.toLower msg =
+      ["Check spelling", "Import module containing the function", "Define the variable/function"]
+  | otherwise = commonErrorSuggestions msg

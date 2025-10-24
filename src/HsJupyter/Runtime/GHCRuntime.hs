@@ -22,11 +22,13 @@ import Control.Concurrent.STM
 import Control.Monad.IO.Class
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.Timeout (timeout)
 import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter, interpret, as, setImports)
 
-import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), newGHCSession, cleanupSession, listBindings)
-import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), ghcErrorToDiagnostic)
+import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings)
+import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), ghcErrorToDiagnostic, interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
+import HsJupyter.Runtime.SessionState (ResourceBudget(..))
 
 -- | Input structure for GHC evaluation operations
 data GHCEvaluationRequest = GHCEvaluationRequest
@@ -53,22 +55,30 @@ data EvaluationType
   | Import         -- Import module
   deriving (Show, Eq)
 
--- | Evaluate a Haskell expression and return its result
-evaluateExpression :: GHCSessionState -> Text -> STM (Either GHCError Text)
-evaluateExpression _session code = do
-  -- Placeholder implementation - real hint integration will be added in Phase 3
-  return $ Right $ "Evaluated: " <> code
+-- | Evaluate a Haskell expression with timeout protection
+evaluateExpression :: GHCSessionState -> Text -> IO (Either GHCError Text)
+evaluateExpression session code = do
+  let timeoutSeconds = expressionTimeout (sessionConfig session)
+  result <- timeout (timeoutSeconds * 1000000) $ runInterpreter $ do  -- Convert to microseconds
+    setImports ["Prelude"]  -- Start with basic Prelude imports
+    -- Wrap expression with 'show' to get String representation  
+    let wrappedCode = "show (" ++ T.unpack code ++ ")"
+    interpret wrappedCode (as :: String)
+  case result of
+    Nothing -> return $ Left (TimeoutError timeoutSeconds)  -- Timeout occurred
+    Just (Left err) -> return $ Left (interpretError err)   -- Interpreter error
+    Just (Right value) -> return $ Right (T.pack value)     -- Success
 
 -- | Execute a Haskell declaration (variable/function definition)
-evaluateDeclaration :: GHCSessionState -> Text -> STM (Either GHCError [String])
+evaluateDeclaration :: GHCSessionState -> Text -> IO (Either GHCError [String])
 evaluateDeclaration _session _code = do
-  -- Placeholder implementation
+  -- Placeholder implementation for Phase 4
   return $ Right []
 
 -- | Import a Haskell module with security policy checking
-importModule :: GHCSessionState -> String -> STM (Either GHCError ())
+importModule :: GHCSessionState -> String -> IO (Either GHCError ())
 importModule _session _moduleName = do
-  -- Placeholder implementation
+  -- Placeholder implementation for Phase 5
   return $ Right ()
 
 -- | Initialize a new GHC session with configuration
@@ -88,13 +98,25 @@ getSessionBindings = listBindings
 -- | Default GHC configuration with safe defaults
 defaultGHCConfig :: GHCConfig
 defaultGHCConfig = GHCConfig
-  { expressionTimeout = 1       -- 1 second for expressions
-  , compilationTimeout = 5      -- 5 seconds for imports/compilation
-  , computationTimeout = 10     -- 10 seconds for complex computations
+  { expressionTimeout = 10      -- 10 seconds for expressions (increased for reliability)
+  , compilationTimeout = 15     -- 15 seconds for imports/compilation
+  , computationTimeout = 20     -- 20 seconds for complex computations
   , importPolicy = defaultSafePolicy
   , resourceLimits = defaultResourceBudget
   }
   where
-    -- These will be properly imported once available
-    defaultSafePolicy = error "ImportPolicy not yet implemented"
-    defaultResourceBudget = error "ResourceBudget not yet imported"
+    -- Safe default import policy - allow basic imports
+    defaultSafePolicy = ImportPolicy
+      { allowedModules = mempty
+      , deniedModules = mempty  
+      , defaultPolicy = Allow
+      , systemModulesAllowed = True
+      }
+    
+    -- Default resource budget - generous for development
+    defaultResourceBudget = ResourceBudget
+      { rbCpuTimeout = 30.0
+      , rbMemoryLimit = 256 * 1024 * 1024  -- 256MB
+      , rbTempDirectory = "/tmp"
+      , rbMaxStreamBytes = 1024 * 1024     -- 1MB
+      }
