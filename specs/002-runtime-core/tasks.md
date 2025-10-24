@@ -13,8 +13,8 @@
 
 **Purpose**: Prepare build/test tooling for runtime additions.
 
-- [ ] T001 Update `hs-jupyter-kernel.cabal` with runtime modules and dependencies (`ghc`, `hint`, `exceptions`, `stm`, `temporary`).
-- [ ] T002 Ensure `cabal.project` and `.gitignore` include runtime artifacts (e.g., `.ghci-tmp`, `dist-newstyle` already covered) and add sandbox temp directories if needed.
+- [X] T001 Update `hs-jupyter-kernel.cabal` with runtime modules and dependencies (`ghc`, `hint`, `exceptions`, `stm`, `temporary`).
+- [X] T002 Ensure `cabal.project` and `.gitignore` include runtime artifacts (e.g., `.ghci-tmp`, `dist-newstyle` already covered) and add sandbox temp directories if needed.
 
 ---
 
