@@ -94,6 +94,9 @@ test-suite unit
     SessionStateSpec
     SignatureValidationSpec
     TelemetrySpec
+  ghc-options:
+    -rtsopts
+    -with-rtsopts=-T
   default-extensions: OverloadedStrings
   build-depends:
     , aeson
@@ -125,3 +128,6 @@ test-suite integration
     , text
     , time
     , zeromq4-haskell
+  ghc-options:
+    -rtsopts
+    -with-rtsopts=-T

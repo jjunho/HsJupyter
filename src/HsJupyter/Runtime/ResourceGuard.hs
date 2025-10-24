@@ -16,13 +16,23 @@ module HsJupyter.Runtime.ResourceGuard
   , defaultResourceLimits
   ) where
 
-import Control.Concurrent (ThreadId, forkIO, killThread, threadDelay)
+import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Concurrent.STM
-import Control.Exception (Exception, SomeException, bracket, catch, throwIO, try)
-import Control.Monad (forever, when)
-import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
-import GHC.Stats (getRTSStats, RTSStats(..))
+import Control.Exception
+  ( AsyncException (..)
+  , Exception
+  , SomeException
+  , bracket
+  , catch
+  , displayException
+  , throwIO
+  , throwTo
+  , try
+  )
+import Control.Monad (unless, when)
+import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
+import GHC.Stats (GCDetails(..), RTSStats(..), getRTSStats, getRTSStatsEnabled)
 
 -- | CPU limit measurement modes
 data CpuLimitMode 
@@ -58,6 +68,7 @@ data ResourceViolation
   = TimeoutViolation Double Double    -- ^ (elapsed, limit) in seconds
   | MemoryViolation Int Int          -- ^ (used, limit) in MB  
   | OutputViolation Int Int          -- ^ (size, limit) in bytes
+  | ExecutionError String            -- ^ Underlying execution raised exception
   deriving (Show, Eq)
 
 instance Exception ResourceViolation
@@ -84,94 +95,121 @@ defaultResourceLimits = ResourceLimits
 withResourceGuard :: ResourceLimits -> (ResourceGuard -> IO a) -> IO a
 withResourceGuard limits action = do
   let config = ResourceConfig limits True 0.1  -- 100ms monitoring interval
-  
+
   startTime <- getCurrentTime
   stopFlag <- newTVarIO False
-  
-  let guard = ResourceGuard config startTime stopFlag Nothing
-  
+  actionThread <- myThreadId
+
+  let baseGuard = ResourceGuard config startTime stopFlag Nothing
+
   if rgEnforcement config
     then do
-      -- Start monitoring thread
-      monitorThread <- forkIO $ monitorResources guard
-      let guardWithMonitor = guard { rgMonitorThread = Just monitorThread }
-      
+      monitorThread <- forkIO $ monitorResources baseGuard actionThread
+      let guardWithMonitor = baseGuard { rgMonitorThread = Just monitorThread }
+
       bracket
         (return guardWithMonitor)
         (\g -> do
           atomically $ writeTVar stopFlag True
           case rgMonitorThread g of
             Just tid -> killThread tid
-            Nothing -> return ())
+            Nothing -> pure ())
         action
-    else action guard
+    else action baseGuard
 
 -- | Monitor resource usage in background thread
-monitorResources :: ResourceGuard -> IO ()
-monitorResources guard = do
+monitorResources :: ResourceGuard -> ThreadId -> IO ()
+monitorResources guard actionThread = do
   let config = rgConfig guard
       limits = rgLimits config
-      interval = rgMonitoringInterval config
-  
-  catch (forever $ do
-    shouldStop <- readTVarIO (rgStopFlag guard)
-    when shouldStop $ return ()
-    
-    -- Check time limit
-    now <- getCurrentTime
-    let elapsed = realToFrac $ diffUTCTime now (rgStartTime guard)
-    when (elapsed > rcMaxCpuSeconds limits) $ do
-      throwIO $ TimeoutViolation elapsed (rcMaxCpuSeconds limits)
-    
-    -- Check memory limit (simplified)
-    stats <- getRTSStats
-    let memUsedBytes = fromIntegral $ allocated_bytes stats
-        memUsedMB = memUsedBytes `div` (1024 * 1024)
-    when (memUsedMB > rcMaxMemoryMB limits) $ do
-      throwIO $ MemoryViolation memUsedMB (rcMaxMemoryMB limits)
-    
-    -- Sleep for monitoring interval
-    threadDelay $ round (interval * 1000000)
-    ) $ \(_ :: SomeException) -> do
-      -- Monitor thread caught exception, stop monitoring
-      atomically $ writeTVar (rgStopFlag guard) True
+      intervalMicros = round (rgMonitoringInterval config * 1000000)
+
+      notify violation = do
+        shouldNotify <- atomically $ do
+          alreadyStopped <- readTVar (rgStopFlag guard)
+          if alreadyStopped
+            then pure False
+            else writeTVar (rgStopFlag guard) True >> pure True
+        when shouldNotify $ do
+          _ <- try (throwTo actionThread violation) :: IO (Either SomeException ())
+          pure ()
+
+  statsEnabled <- getRTSStatsEnabled
+
+  let loop = do
+        stop <- readTVarIO (rgStopFlag guard)
+        unless stop $ do
+          now <- getCurrentTime
+          let elapsed = realToFrac $ diffUTCTime now (rgStartTime guard)
+          if elapsed > rcMaxCpuSeconds limits
+            then notify (TimeoutViolation elapsed (rcMaxCpuSeconds limits))
+            else do
+              when statsEnabled $ do
+                statsResult <- try getRTSStats
+                case statsResult of
+                  Right stats -> do
+                    let memUsedBytes = fromIntegral (allocated_bytes stats) :: Integer
+                        memUsedMB = fromIntegral (memUsedBytes `div` (1024 * 1024)) :: Int
+                    when (memUsedMB > rcMaxMemoryMB limits) $
+                      notify (MemoryViolation memUsedMB (rcMaxMemoryMB limits))
+                  Left (_ :: SomeException) -> pure ()
+              threadDelay intervalMicros
+              loop
+
+  loop `catch` \(ae :: AsyncException) ->
+    case ae of
+      ThreadKilled -> pure ()
+      _            -> throwIO ae
 
 -- | Check resource limits for an action
 checkResourceLimits :: ResourceLimits -> IO a -> IO (Either ResourceViolation a)
 checkResourceLimits limits action = do
   result <- try $ withResourceGuard limits $ \_ -> action
-  case result of
-    Left violation -> return $ Left violation
-    Right value -> return $ Right value
+  pure $ case result of
+    Left violation -> Left violation
+    Right value    -> Right value
 
 -- | Limit execution time of an action
-limitExecutionTime :: Double -> IO a -> IO (Either ResourceViolation a)
+limitExecutionTime :: forall a. Double -> IO a -> IO (Either ResourceViolation a)
 limitExecutionTime timeoutSecs action = do
-  result <- race 
+  result <- race
     (do threadDelay $ round (timeoutSecs * 1000000)
-        return $ TimeoutViolation timeoutSecs timeoutSecs)
-    (Right <$> action)
-  
-  case result of
-    Left violation -> return $ Left violation
-    Right (Right value) -> return $ Right value
-    Right (Left _) -> return $ Left $ TimeoutViolation timeoutSecs timeoutSecs
+        pure (TimeoutViolation timeoutSecs timeoutSecs))
+    (try action :: IO (Either SomeException a))
+
+  pure $ case result of
+    Left violation      -> Left violation
+    Right (Left ex)     -> Left (ExecutionError (displayException ex))
+    Right (Right value) -> Right value
 
 -- | Monitor memory usage during action execution
-monitorMemoryUsage :: IO a -> IO (Either SomeException (a, Int))
+monitorMemoryUsage :: forall a. IO a -> IO (Either SomeException (a, Int))
 monitorMemoryUsage action = do
-  startStats <- getRTSStats
-  let startMem = allocated_bytes startStats
-  
-  result <- try action
-  
-  endStats <- getRTSStats
-  let endMem = allocated_bytes endStats
-      usedMB = fromIntegral (endMem - startMem) `div` (1024 * 1024)
-  
-  case result of
-    Left ex -> return $ Left ex
-    Right value -> return $ Right (value, usedMB)
+  statsEnabled <- getRTSStatsEnabled
+  if not statsEnabled
+    then do
+      result <- try action :: IO (Either SomeException a)
+      pure $ case result of
+        Left ex    -> Left ex
+        Right value -> Right (value, 0)
+    else do
+      startStats <- getRTSStats
+      let startBytes = fromIntegral (gcdetails_mem_in_use_bytes (gc startStats)) :: Integer
+
+      result <- try action
+
+      endStats <- getRTSStats
+      let endBytes = fromIntegral (gcdetails_mem_in_use_bytes (gc endStats)) :: Integer
+          usedBytes = max 0 (endBytes - startBytes)
+          bytesPerMb :: Double
+          bytesPerMb = 1024 * 1024
+          rawMb :: Int
+          rawMb = fromIntegral (ceiling (fromIntegral usedBytes / bytesPerMb))
+          usedMB = if rawMb <= 0 then 1 else rawMb
+
+      pure $ case result of
+        Left ex    -> Left ex
+        Right value -> Right (value, usedMB)
 
 -- | Truncate output to specified byte limit
 truncateOutput :: Int -> String -> String

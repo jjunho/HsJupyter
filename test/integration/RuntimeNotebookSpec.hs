@@ -18,6 +18,7 @@ import HsJupyter.Runtime.SessionState
   , ExecutionOutcome(..)
   , ExecutionStatus(..)
   , ResourceBudget(..)
+  , StreamChunk(..)
   )
 
 -- Helper to create test context
@@ -216,9 +217,9 @@ spec = describe "Runtime notebook flows" $ do
         
         -- Should succeed but output should be truncated
         outcomeStatus outcome `shouldBe` ExecutionOk
-        case outcomeValue outcome of
-          Just output -> length (T.unpack output) `shouldSatisfy` (<= 50)
-          Nothing -> expectationFailure "Expected output value"
+        case outcomeStreams outcome of
+          (StreamChunk _ text : _) -> T.length text `shouldSatisfy` (<= 50)
+          [] -> expectationFailure "Expected stream output"
 
     it "monitors resource usage patterns across multiple executions" $ do
       let monitoringBudget = testResourceBudget
@@ -229,8 +230,8 @@ spec = describe "Runtime notebook flows" $ do
       
       withRuntimeManager monitoringBudget 5 $ \manager -> do
         -- Execute multiple code snippets to test resource monitoring
-        let contexts = [ testExecuteContext ("monitor-" ++ show i) | i <- [1..3] ]
-        let codes = [ "let x" ++ show i ++ " = " ++ show (i * 10)
+        let contexts = [ testExecuteContext (T.pack ("monitor-" <> show i)) | i <- [1..3] ]
+        let codes = [ T.pack ("let x" <> show i <> " = " <> show (i * 10))
                     | i <- [1..3] ]
         
         outcomes <- mapM (\(ctx, code) -> submitExecute manager ctx testJobMetadata code) 
