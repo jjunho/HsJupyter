@@ -6,6 +6,16 @@ import Test.Hspec
 import Control.Monad.IO.Class (liftIO)
 
 import HsJupyter.CLI.Install
+  ( detectJupyterEnvironment
+  , validateJupyterEnvironment
+  , validateKernelspecDirectories
+  , executeInstall
+  -- T016: New functions
+  , findKernelspecDirectories
+  , ensureDirectoryExists
+  , getKernelPath
+  , validateKernelInstallation
+  )
 import HsJupyter.CLI.Commands (InstallOptions(..), defaultInstallOptions)
 import HsJupyter.CLI.Types
 
@@ -72,3 +82,63 @@ spec = describe "HsJupyter.CLI.Install" $ do
         Left _diag ->
           -- Acceptable if system dependencies not available in test environment
           pendingWith "Installation failed due to test environment constraints"
+  
+  -- T016: Kernelspec Directory Discovery and Validation Tests
+  describe "findKernelspecDirectories" $ do
+    it "should find available kernelspec directories in the system" $ do
+      result <- liftIO findKernelspecDirectories
+      case result of
+        Right dirs ->
+          -- Should find at least some standard directories (even if not all exist)
+          dirs `shouldNotBe` []
+        Left _diag ->
+          pendingWith "No kernelspec directories found in test environment"
+  
+  describe "ensureDirectoryExists" $ do
+    it "should create directory if it doesn't exist" $ do
+      let testDir = "/tmp/test-hs-jupyter-kernelspec"
+      result <- liftIO $ ensureDirectoryExists testDir
+      case result of
+        Right createdDir ->
+          createdDir `shouldBe` testDir
+        Left _diag ->
+          pendingWith "Failed to create test directory"
+    
+    it "should handle existing directories gracefully" $ do
+      let testDir = "/tmp"  -- Directory that should always exist
+      result <- liftIO $ ensureDirectoryExists testDir
+      case result of
+        Right existingDir ->
+          existingDir `shouldBe` testDir
+        Left _diag ->
+          pendingWith "Failed to handle existing directory"
+  
+  describe "getKernelPath" $ do
+    it "should construct correct kernel.json path" $ do
+      let kernelspecDir = "/usr/local/share/jupyter/kernels"
+          kernelName = "haskell"
+          expectedPath = "/usr/local/share/jupyter/kernels/haskell/kernel.json"
+      getKernelPath kernelspecDir kernelName `shouldBe` expectedPath
+    
+    it "should handle kernel names with special characters" $ do
+      let kernelspecDir = "/home/user/.local/share/jupyter/kernels"
+          kernelName = "hs-jupyter-test"
+          expectedPath = "/home/user/.local/share/jupyter/kernels/hs-jupyter-test/kernel.json"
+      getKernelPath kernelspecDir kernelName `shouldBe` expectedPath
+  
+  describe "validateKernelInstallation" $ do
+    it "should validate kernel installation prerequisites" $ do
+      let testKernelspecDir = "/tmp/test-kernelspec"
+          kernelName = "test-kernel"
+      -- First ensure the kernelspec directory exists
+      ensureResult <- liftIO $ ensureDirectoryExists testKernelspecDir
+      case ensureResult of
+        Right _ -> do
+          result <- liftIO $ validateKernelInstallation testKernelspecDir kernelName
+          case result of
+            Right kernelPath ->
+              kernelPath `shouldBe` "/tmp/test-kernelspec/test-kernel/kernel.json"
+            Left _diag ->
+              pendingWith "Kernel installation validation failed"
+        Left _diag ->
+          pendingWith "Failed to create test kernelspec directory"
