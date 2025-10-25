@@ -56,7 +56,7 @@ Each user story must be independently testable:
 - [x] T008 [P] Implement system detection utilities in src/HsJupyter/CLI/Utilities.hs
 - [x] T009 [P] Implement configuration management in src/HsJupyter/CLI/Configuration.hs
 - [x] T010 Create unit tests for core data models in test/unit/CLITypesSpec.hs
-- [ ] T011 [P] Create unit tests for system detection in test/unit/SystemIntegrationSpec.hs
+- [x] T011 [P] Create unit tests for system detection in test/unit/SystemIntegrationSpec.hs
 
 ---
 
@@ -68,9 +68,9 @@ Each user story must be independently testable:
 
 ### Command Infrastructure
 
-- [ ] T012 [US1] Implement basic CLI command parser structure in src/HsJupyter/CLI/Commands.hs
-- [ ] T013 [US1] Implement InstallOptions data type and parser in src/HsJupyter/CLI/Commands.hs
-- [ ] T014 [P] [US1] Create unit tests for command parsing in test/unit/CLICommandsSpec.hs
+- [x] T012 [US1] Implement basic CLI command parser structure in src/HsJupyter/CLI/Commands.hs
+- [x] T013 [US1] Implement InstallOptions data type and parser in src/HsJupyter/CLI/Commands.hs  
+- [x] T014 [P] [US1] Create unit tests for command parsing in test/unit/CLICommandsSpec.hs
 
 ### Core Installation Logic
 

@@ -62,6 +62,7 @@ library
                      , HsJupyter.Runtime.GHCDiagnostics
                      , HsJupyter.Runtime.ResourceGuard
                      , HsJupyter.Runtime.Telemetry
+                     , HsJupyter.CLI.Commands
                      , HsJupyter.CLI.Install
                      , HsJupyter.CLI.Types
                      , HsJupyter.CLI.Utilities
@@ -96,6 +97,7 @@ test-suite unit
   hs-source-dirs: test/unit
   main-is:        Spec.hs
   other-modules:
+    CLICommandsSpec
     CLIInstallSpec
     CLITypesSpec
     DiagnosticsSpec
@@ -109,6 +111,7 @@ test-suite unit
     RuntimeManagerSpec
     SessionStateSpec
     SignatureValidationSpec
+    SystemIntegrationSpec
     TelemetrySpec
   ghc-options:
     -rtsopts
