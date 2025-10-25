@@ -2,121 +2,161 @@
 
 -- | CLI Install module - handles kernel installation commands and operations
 module HsJupyter.CLI.Install 
-  ( InstallCommand(..)
-  , InstallOptions(..)
-  , defaultInstallOptions
-  , parseInstallCommand
-  , validateInstallOptions
-  , executeInstall
+  ( executeInstall
+  , detectJupyterEnvironment
+  , validateJupyterEnvironment
+  , validateKernelspecDirectories
   ) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
 
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
   , ValidationLevel(..)
   , CLIDiagnostic(..)
+  , JupyterEnvironment(..)
+  , PythonEnvironment(..)
+  , JupyterVersion(..)
+  , InstallationType(..)
   )
+import HsJupyter.CLI.Commands (InstallOptions(..))
+import qualified HsJupyter.CLI.Utilities as Utilities
 
--- | Represents an install command with parsed options
-data InstallCommand = InstallCommand InstallOptions
-  deriving (Show, Eq)
-
--- | Installation options parsed from command line
-data InstallOptions = InstallOptions
-  { ioScope            :: InstallScope     -- ^ Installation scope (user/system/auto)
-  , ioForceReinstall   :: Bool             -- ^ Force overwrite existing installation
-  , ioValidationLevel  :: ValidationLevel -- ^ Post-install validation depth
-  , ioDisplayName      :: Maybe Text       -- ^ Custom kernel display name
-  , ioGHCPath          :: Maybe FilePath   -- ^ Custom GHC executable path
-  , ioJupyterDir       :: Maybe FilePath   -- ^ Custom Jupyter directory
-  , ioKernelspecDir    :: Maybe FilePath   -- ^ Custom kernelspec directory
-  , ioQuietMode        :: Bool             -- ^ Suppress interactive prompts
-  } deriving (Show, Eq)
-
--- | Default installation options following constitutional KISS principle
-defaultInstallOptions :: InstallOptions
-defaultInstallOptions = InstallOptions
-  { ioScope = AutoDetect              -- Auto-detect best installation scope
-  , ioForceReinstall = False          -- Safe default - don't overwrite
-  , ioValidationLevel = BasicValidation -- Balance speed vs verification
-  , ioDisplayName = Nothing           -- Use default "Haskell" name
-  , ioGHCPath = Nothing               -- Auto-detect GHC
-  , ioJupyterDir = Nothing            -- Use standard Jupyter directories
-  , ioKernelspecDir = Nothing         -- Use standard kernelspec directories
-  , ioQuietMode = False               -- Interactive by default
-  }
-
--- | Parse install command from command line arguments
-parseInstallCommand :: [String] -> Either String InstallCommand
-parseInstallCommand args = do
-  options <- parseInstallArgs args defaultInstallOptions
-  return $ InstallCommand options
-
--- | Parse install command arguments recursively
-parseInstallArgs :: [String] -> InstallOptions -> Either String InstallOptions
-parseInstallArgs [] options = Right options
-parseInstallArgs ("install":rest) options = parseInstallArgs rest options
-parseInstallArgs ("--user":rest) options = 
-  parseInstallArgs rest options { ioScope = UserInstallation }
-parseInstallArgs ("--system":rest) options = 
-  parseInstallArgs rest options { ioScope = SystemInstallation }
-parseInstallArgs ("--force":rest) options = 
-  parseInstallArgs rest options { ioForceReinstall = True }
-parseInstallArgs ("--quiet":rest) options = 
-  parseInstallArgs rest options { ioQuietMode = True }
-parseInstallArgs ("--display-name":name:rest) options = 
-  parseInstallArgs rest options { ioDisplayName = Just (T.pack name) }
-parseInstallArgs ("--ghc-path":path:rest) options = 
-  parseInstallArgs rest options { ioGHCPath = Just path }
-parseInstallArgs ("--jupyter-dir":path:rest) options = 
-  parseInstallArgs rest options { ioJupyterDir = Just path }
-parseInstallArgs ("--kernelspec-dir":path:rest) options = 
-  parseInstallArgs rest options { ioKernelspecDir = Just path }
-parseInstallArgs ("--validation":level:rest) options = do
-  validationLevel <- parseValidationLevel level
-  parseInstallArgs rest options { ioValidationLevel = validationLevel }
-parseInstallArgs (arg:_) _ = 
-  Left $ "Unknown install option: " ++ arg
-
--- | Parse validation level from string
-parseValidationLevel :: String -> Either String ValidationLevel
-parseValidationLevel "none" = Right NoValidation
-parseValidationLevel "basic" = Right BasicValidation  
-parseValidationLevel "full" = Right FullValidation
-parseValidationLevel invalid = Left $ "Invalid validation level: " ++ invalid
-
--- | Validate install options for consistency and feasibility
-validateInstallOptions :: InstallOptions -> Either String InstallOptions
-validateInstallOptions options = do
-  -- Validate custom GHC path exists if specified
-  case ioGHCPath options of
-    Nothing -> return ()
-    Just ghcPath -> do
-      exists <- pure False -- TODO: implement doesFileExist check
-      when (not exists) $ 
-        Left $ "Custom GHC path does not exist: " ++ ghcPath
-  
-  -- Validate custom directories exist if specified
-  case ioJupyterDir options of
-    Nothing -> return ()
-    Just _jupyterDir -> do
-      -- TODO: implement directory existence check
-      return ()
-  
-  case ioKernelspecDir options of
-    Nothing -> return ()
-    Just _kernelspecDir -> do
-      -- TODO: implement directory existence check
-      return ()
-  
-  return options
-
--- | Execute kernel installation with given options
+-- | Execute kernel installation with given options (T015: Jupyter environment detection)
 executeInstall :: InstallOptions -> IO (Either CLIDiagnostic ())
-executeInstall _options = do
-  -- TODO: Implement actual installation logic
-  -- This is a placeholder that will be expanded in subsequent tasks
-  return $ Right ()
+executeInstall options = do
+  -- Step 1: Detect Jupyter environment (T015 implementation)
+  jupyterEnvResult <- detectJupyterEnvironment
+  case jupyterEnvResult of
+    Left diag -> return $ Left diag
+    Right jupyterEnv -> do
+      -- Step 2: Validate environment meets installation requirements  
+      validationResult <- validateJupyterEnvironment jupyterEnv options
+      case validationResult of
+        Left diag -> return $ Left diag
+        Right validatedEnv -> do
+          -- TODO: Continue with actual installation steps (T016-T018)
+          -- For now, return success to indicate environment detection works
+          return $ Right ()
+
+-- | Detect current Jupyter environment using system utilities (T015)
+detectJupyterEnvironment :: IO (Either CLIDiagnostic JupyterEnvironment)
+detectJupyterEnvironment = do
+  -- Use the Utilities module function for core detection
+  result <- Utilities.detectJupyterEnvironment
+  case result of
+    Left diag -> return $ Left diag
+    Right jupyterEnv -> do
+      -- Enhanced detection with additional validation
+      enhancedResult <- enhanceJupyterEnvironment jupyterEnv
+      return $ Right enhancedResult
+
+-- | Enhance detected Jupyter environment with additional validation
+enhanceJupyterEnvironment :: JupyterEnvironment -> IO JupyterEnvironment
+enhanceJupyterEnvironment jupyterEnv = do
+  -- Verify kernelspec directories are accessible
+  validatedDirs <- filterValidKernelspecDirs (jeKernelspecDirs jupyterEnv)
+  
+  -- Detect more precise Python version information
+  enhancedPython <- enhancePythonEnvironment (jePythonEnv jupyterEnv)
+  
+  return jupyterEnv 
+    { jeKernelspecDirs = validatedDirs
+    , jePythonEnv = enhancedPython
+    }
+
+-- | Filter kernelspec directories to only include accessible ones
+filterValidKernelspecDirs :: [FilePath] -> IO [FilePath]
+filterValidKernelspecDirs dirs = do
+  -- TODO: Implement actual directory validation (will be enhanced in T016)
+  -- For now, return all directories (basic implementation for T015)
+  return dirs
+
+-- | Enhance Python environment information with more details
+enhancePythonEnvironment :: PythonEnvironment -> IO PythonEnvironment
+enhancePythonEnvironment pythonEnv = do
+  -- TODO: Get actual Python version information
+  -- For now, return enhanced basic info (will be improved in subsequent tasks)
+  return pythonEnv
+    { peVersion = "3.x.x" -- Placeholder - will be detected properly
+    }
+
+-- | Validate detected Jupyter environment against install options (T015)
+validateJupyterEnvironment :: JupyterEnvironment -> InstallOptions -> IO (Either CLIDiagnostic JupyterEnvironment)
+validateJupyterEnvironment jupyterEnv options = do
+  -- Validate kernelspec directories are accessible for the chosen scope
+  kernelspecValidation <- validateKernelspecDirectories (jeKernelspecDirs jupyterEnv) options
+  case kernelspecValidation of
+    Left diag -> return $ Left diag
+    Right validatedDirs -> do
+      -- Update environment with validated directories
+      let updatedEnv = jupyterEnv { jeKernelspecDirs = validatedDirs }
+      
+      -- Validate Python environment compatibility
+      pythonValidation <- validatePythonCompatibility (jePythonEnv jupyterEnv) options
+      case pythonValidation of
+        Left diag -> return $ Left diag
+        Right validatedPython -> do
+          let finalEnv = updatedEnv { jePythonEnv = validatedPython }
+          return $ Right finalEnv
+
+-- | Validate kernelspec directories exist and are writable for installation scope (T015)
+validateKernelspecDirectories :: [FilePath] -> InstallOptions -> IO (Either CLIDiagnostic [FilePath])
+validateKernelspecDirectories dirs options = do
+  -- Filter directories based on installation scope and accessibility
+  case ioScope options of
+    AutoDetect -> do
+      -- Try to find the best available directory
+      validDirs <- filterAccessibleDirectories dirs
+      if null validDirs
+        then return $ Left $ ValidationError "No accessible kernelspec directories found"
+        else return $ Right validDirs
+    UserInstallation -> do
+      -- Filter to user-accessible directories only
+      userDirs <- filterUserDirectories dirs
+      if null userDirs
+        then return $ Left $ ValidationError "No user-accessible kernelspec directories found"
+        else return $ Right userDirs
+    SystemInstallation -> do
+      -- Filter to system directories only
+      systemDirs <- filterSystemDirectories dirs
+      if null systemDirs
+        then return $ Left $ ValidationError "No system kernelspec directories found or insufficient permissions"
+        else return $ Right systemDirs
+
+-- | Filter directories to only include accessible ones
+filterAccessibleDirectories :: [FilePath] -> IO [FilePath]
+filterAccessibleDirectories dirs = do
+  -- TODO: Implement actual accessibility checking (enhanced in T016)
+  -- For T015, return all directories as accessible (basic implementation)
+  return dirs
+
+-- | Filter directories to user-accessible ones
+filterUserDirectories :: [FilePath] -> IO [FilePath]
+filterUserDirectories dirs = do
+  -- TODO: Implement actual user directory filtering (enhanced in T016)
+  -- For T015, return directories that look like user directories
+  return $ filter isUserDirectory dirs
+  where
+    isUserDirectory dir = "/home/" `T.isInfixOf` T.pack dir || "/.local/" `T.isInfixOf` T.pack dir
+
+-- | Filter directories to system ones
+filterSystemDirectories :: [FilePath] -> IO [FilePath]
+filterSystemDirectories dirs = do
+  -- TODO: Implement actual system directory filtering (enhanced in T016)
+  -- For T015, return directories that look like system directories
+  return $ filter isSystemDirectory dirs
+  where
+    isSystemDirectory dir = "/usr/" `T.isInfixOf` T.pack dir || "/opt/" `T.isInfixOf` T.pack dir
+
+-- | Validate Python environment compatibility with installation requirements
+validatePythonCompatibility :: PythonEnvironment -> InstallOptions -> IO (Either CLIDiagnostic PythonEnvironment)
+validatePythonCompatibility pythonEnv _options = do
+  -- TODO: Implement actual Python version checking and GHC compatibility validation
+  -- For T015, perform basic validation
+  if pePath pythonEnv == ""
+    then return $ Left $ ValidationError "Python executable not found"
+    else return $ Right pythonEnv
