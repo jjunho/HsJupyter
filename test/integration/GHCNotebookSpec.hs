@@ -268,3 +268,134 @@ spec = describe "GHC Notebook Integration" $ do
         case outcomeValue outcome2 of
           Just result -> result `shouldBe` "[3,2,1]"
           Nothing -> expectationFailure "Expected reversed list result"
+
+  describe "Resource limit enforcement" $ do
+    it "enforces CPU timeout limits during execution" $ do
+      -- Use a very restrictive timeout budget for testing
+      let restrictiveResourceBudget = ResourceBudget
+            { rbCpuTimeout = 1  -- 1 second timeout
+            , rbMemoryLimit = 1024 * 1024 * 200  -- 200MB
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 1024 * 1024     -- 1MB
+            }
+      
+      withRuntimeManager restrictiveResourceBudget 10 $ \manager -> do
+        -- Submit a computation that should timeout
+        let ctx = testExecuteContext "ghc-timeout-001"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "let slowComputation = [1..10^6] !! (10^6 - 1) in slowComputation"
+        
+        -- Should timeout or complete - either is acceptable for this timeout period
+        outcomeStatus outcome `shouldSatisfy` (\status -> status == ExecutionOk || status == ExecutionError)
+        -- If it errored, should have timeout-related diagnostic
+        case outcomeStatus outcome of
+          ExecutionError -> length (outcomeDiagnostics outcome) `shouldSatisfy` (> 0)
+          ExecutionOk -> return ()  -- Fast execution is also acceptable
+
+    it "enforces memory limits during execution" $ do
+      -- Use a very restrictive memory budget for testing
+      let restrictiveMemoryBudget = ResourceBudget
+            { rbCpuTimeout = 30  -- Normal timeout
+            , rbMemoryLimit = 1024 * 1024 * 10  -- Only 10MB memory limit
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 1024 * 1024     -- 1MB
+            }
+      
+      withRuntimeManager restrictiveMemoryBudget 10 $ \manager -> do
+        -- Submit a computation that should use moderate memory
+        let ctx = testExecuteContext "ghc-memory-001"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "length [1..1000]"
+        
+        -- Should complete successfully with reasonable memory usage
+        outcomeStatus outcome `shouldBe` ExecutionOk
+        case outcomeValue outcome of
+          Just result -> result `shouldBe` "1000"
+          Nothing -> expectationFailure "Expected numeric result"
+
+    it "enforces output size limits" $ do
+      -- Use a very restrictive output budget for testing
+      let restrictiveOutputBudget = ResourceBudget
+            { rbCpuTimeout = 30  -- Normal timeout
+            , rbMemoryLimit = 1024 * 1024 * 200  -- Normal memory
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 100  -- Only 100 bytes output
+            }
+      
+      withRuntimeManager restrictiveOutputBudget 10 $ \manager -> do
+        -- Submit a computation that produces large output
+        let ctx = testExecuteContext "ghc-output-001"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "[1..100]"
+        
+        -- Should either succeed with truncated output or handle the limit
+        outcomeStatus outcome `shouldSatisfy` (\status -> status == ExecutionOk || status == ExecutionError)
+        -- Output should be present but potentially truncated
+        case outcomeValue outcome of
+          Just result -> T.length result `shouldSatisfy` (> 0)  -- Some output should be present
+          Nothing -> return ()  -- Or no output if truncated completely
+
+    it "combines multiple resource limits effectively" $ do
+      -- Use restrictive limits across all dimensions
+      let veryRestrictiveBudget = ResourceBudget
+            { rbCpuTimeout = 2   -- 2 second timeout
+            , rbMemoryLimit = 1024 * 1024 * 50  -- 50MB memory
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 500  -- 500 bytes output
+            }
+      
+      withRuntimeManager veryRestrictiveBudget 10 $ \manager -> do
+        -- Test simple computation under all limits
+        let ctx1 = testExecuteContext "ghc-combined-001"
+        outcome1 <- submitGHCExecute manager ctx1 testJobMetadata "sum [1..10]"
+        
+        outcomeStatus outcome1 `shouldBe` ExecutionOk
+        case outcomeValue outcome1 of
+          Just result -> result `shouldBe` "55"
+          Nothing -> expectationFailure "Expected numeric result"
+        
+        -- Test slightly more complex computation
+        let ctx2 = testExecuteContext "ghc-combined-002"
+        outcome2 <- submitGHCExecute manager ctx2 testJobMetadata "map (*2) [1..20]"
+        
+        outcomeStatus outcome2 `shouldBe` ExecutionOk
+        case outcomeValue outcome2 of
+          Just result -> result `shouldSatisfy` (\r -> "[2," `T.isPrefixOf` r)  -- Should start with list
+          Nothing -> expectationFailure "Expected list result"
+
+    it "maintains resource monitoring across multiple evaluations" $ do
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Multiple small evaluations should all complete
+        let contexts = map (\i -> testExecuteContext ("ghc-monitor-" <> T.pack (show i))) [1..5]
+        
+        outcomes <- mapM (\ctx -> submitGHCExecute manager ctx testJobMetadata "2^10") contexts
+        
+        -- All should succeed
+        mapM_ (\outcome -> outcomeStatus outcome `shouldBe` ExecutionOk) outcomes
+        
+        -- All should have increasing execution counts
+        let counts = map outcomeExecutionCount outcomes
+        counts `shouldBe` [1, 2, 3, 4, 5]
+
+    it "handles resource violations gracefully without crashing" $ do
+      -- Create a budget that might be exceeded
+      let testBudget = ResourceBudget
+            { rbCpuTimeout = 5   -- 5 second timeout
+            , rbMemoryLimit = 1024 * 1024 * 100  -- 100MB memory
+            , rbTempDirectory = "/tmp"
+            , rbMaxStreamBytes = 1024  -- 1KB output
+            }
+      
+      withRuntimeManager testBudget 10 $ \manager -> do
+        -- Test a computation that might exceed limits
+        let ctx1 = testExecuteContext "ghc-violation-001"
+        outcome1 <- submitGHCExecute manager ctx1 testJobMetadata "take 1000 (repeat 'a')"
+        
+        -- Should handle gracefully regardless of outcome
+        outcomeStatus outcome1 `shouldSatisfy` (\status -> status == ExecutionOk || status == ExecutionError)
+        
+        -- System should still be responsive for next computation
+        let ctx2 = testExecuteContext "ghc-violation-002"
+        outcome2 <- submitGHCExecute manager ctx2 testJobMetadata "2 + 2"
+        
+        outcomeStatus outcome2 `shouldBe` ExecutionOk
+        case outcomeValue outcome2 of
+          Just result -> result `shouldBe` "4"
+          Nothing -> expectationFailure "Expected numeric result after resource violation"

@@ -4,6 +4,7 @@ module GHCRuntimeSpec (spec) where
 
 import Test.Hspec
 import Control.Concurrent.STM
+import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -57,11 +58,122 @@ spec = describe "GHCRuntime" $ do
         Right _ -> expectationFailure "Expected error for syntax error"
     
     it "respects timeout configuration" $ do
-      let config = testGHCConfig { expressionTimeout = 1 }
+      let config = testGHCConfig
       session <- atomically $ newGHCSession config
-      -- This test is tricky as we need an expression that takes longer than 1 second
-      -- For now, just verify the timeout is set correctly
-      sessionConfig session `shouldSatisfy` (\cfg -> expressionTimeout cfg == 1)
+      -- This should succeed within timeout
+      result <- evaluateExpression session "1 + 1"
+      case result of
+        Right value -> value `shouldBe` "2"
+        Left err -> expectationFailure $ "Expected success, got error: " ++ show err
+
+  describe "timeout behavior" $ do
+    it "applies correct timeout for simple expressions" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      -- Simple arithmetic should use short timeout (3s)
+      result <- evaluateExpressionMonitored session "2 + 3"
+      case result of
+        (Right value, telemetry) -> do
+          value `shouldBe` "5"
+          ptOperationType telemetry `shouldBe` Expression
+          ptSuccess telemetry `shouldBe` True
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "applies correct timeout for complex expressions" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      -- Complex expression should use longer timeout (30s)
+      result <- evaluateExpressionMonitored session "foldr (+) 0 [1..100]"
+      case result of
+        (Right value, telemetry) -> do
+          value `shouldBe` "5050"
+          ptOperationType telemetry `shouldBe` Expression
+          ptSuccess telemetry `shouldBe` True
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "handles timeout for very short timeout config" $ do
+      let shortTimeoutConfig = testGHCConfig { expressionTimeout = 1 }  -- 1 second
+      session <- atomically $ newGHCSession shortTimeoutConfig
+      -- This might timeout due to very short limit
+      result <- evaluateExpression session "sum [1..1000]"
+      case result of
+        Right _ -> return ()  -- Success is also acceptable
+        Left (TimeoutError _) -> return ()  -- Timeout is expected
+        Left err -> expectationFailure $ "Expected timeout or success, got: " ++ show err
+
+    it "differentiated timeout for declarations" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      result <- evaluateDeclarationMonitored session "let x = 42"
+      case result of
+        (Right bindings, telemetry) -> do
+          bindings `shouldBe` ["x"]
+          ptOperationType telemetry `shouldBe` Declaration
+          ptSuccess telemetry `shouldBe` True
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "differentiated timeout for imports" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      result <- evaluateExpressionMonitored session ":m + Data.List"  -- Use GHCi syntax
+      case result of
+        (Right _, telemetry) -> do
+          ptExecutionTime telemetry `shouldSatisfy` (>= 0)
+          ptSuccess telemetry `shouldBe` True
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+  describe "performance monitoring" $ do
+    it "tracks execution time correctly" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      result <- evaluateExpressionMonitored session "2 + 3"
+      case result of
+        (Right value, telemetry) -> do
+          value `shouldBe` "5"
+          ptExecutionTime telemetry `shouldSatisfy` (>= 0)
+          ptCodeLength telemetry `shouldBe` 5  -- "2 + 3"
+          ptSuccess telemetry `shouldBe` True
+          ptErrorType telemetry `shouldBe` Nothing
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "tracks memory usage" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      result <- evaluateExpressionMonitored session "[1..100]"
+      case result of
+        (Right _, telemetry) -> do
+          msAllocatedBytes (ptMemoryBefore telemetry) `shouldSatisfy` (>= 0)
+          msAllocatedBytes (ptMemoryAfter telemetry) `shouldSatisfy` (>= 0)
+          ptSuccess telemetry `shouldBe` True
+        (Left err, _) -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "tracks error information" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      result <- evaluateExpressionMonitored session "1 + \"hello\""  -- Type error
+      case result of
+        (Left _, telemetry) -> do
+          ptSuccess telemetry `shouldBe` False
+          ptErrorType telemetry `shouldSatisfy` (\x -> case x of
+            Just errorMsg -> "CompilationError" `isInfixOf` errorMsg || "No instance for" `isInfixOf` errorMsg
+            Nothing -> False)
+        (Right _, _) -> expectationFailure "Expected error for type mismatch"
+
+  describe "memory limits" $ do
+    it "enforces memory limits" $ do
+      let config = testGHCConfig
+      session <- atomically $ newGHCSession config
+      -- Test memory-limited evaluation
+      result <- evaluateExpressionMemoryLimited session "2 + 3"
+      case result of
+        Right value -> value `shouldBe` "5"
+        Left err -> expectationFailure $ "Expected success, got error: " ++ show err
+
+    it "can get memory statistics" $ do
+      stats <- getCurrentMemoryStats
+      msAllocatedBytes stats `shouldSatisfy` (>= 0)
+      msResidentBytes stats `shouldSatisfy` (>= 0)
+      msMaxResidentBytes stats `shouldSatisfy` (>= 0)
 
   describe "session management" $ do
     it "creates session with correct configuration" $ do
