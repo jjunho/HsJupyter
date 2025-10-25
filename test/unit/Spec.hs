@@ -11,6 +11,7 @@ import qualified ObservabilitySpec
 import qualified ResourceGuardSpec
 import qualified SessionStateSpec
 import qualified RuntimeManagerSpec
+import qualified CLITypesSpec
 
 main :: IO ()
 main = hspec $ do
@@ -25,3 +26,4 @@ main = hspec $ do
   ResourceGuardSpec.spec
   SessionStateSpec.spec
   RuntimeManagerSpec.spec
+  CLITypesSpec.spec

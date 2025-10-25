@@ -39,11 +39,11 @@ Each user story must be independently testable:
 
 **Goal**: Establish project structure and dependencies for CLI extension
 
-- [ ] T001 Add optparse-applicative dependency to hs-jupyter-kernel.cabal
-- [ ] T002 [P] Create CLI module directory structure under src/HsJupyter/CLI/
-- [ ] T003 [P] Create CLI test directory structure under test/unit/ and test/integration/
-- [ ] T004 [P] Update app/KernelMain.hs to support CLI subcommands while preserving existing behavior
-- [ ] T005 [P] Create basic project documentation in docs/cli/ for CLI architecture decisions
+- [x] T001 Add optparse-applicative dependency to hs-jupyter-kernel.cabal
+- [x] T002 [P] Create CLI module directory structure under src/HsJupyter/CLI/
+- [x] T003 [P] Create CLI test directory structure under test/unit/ and test/integration/
+- [x] T004 [P] Update app/KernelMain.hs to support CLI subcommands while preserving existing behavior
+- [x] T005 [P] Create basic project documentation in docs/cli/ for CLI architecture decisions
 
 ---
 
@@ -51,11 +51,11 @@ Each user story must be independently testable:
 
 **Goal**: Core shared infrastructure that blocks all user stories
 
-- [ ] T006 Implement CLIDiagnostic error type extending RuntimeDiagnostic in src/HsJupyter/CLI/Types.hs
-- [ ] T007 Implement core data models (JupyterEnvironment, KernelInstallation) in src/HsJupyter/CLI/Types.hs
-- [ ] T008 [P] Implement system detection utilities in src/HsJupyter/CLI/System.hs
-- [ ] T009 [P] Implement configuration management in src/HsJupyter/CLI/Config.hs
-- [ ] T010 Create unit tests for core data models in test/unit/CLITypesSpec.hs
+- [x] T006 Implement CLIDiagnostic error type extending RuntimeDiagnostic in src/HsJupyter/CLI/Types.hs
+- [x] T007 Implement core data models (JupyterEnvironment, KernelInstallation) in src/HsJupyter/CLI/Types.hs
+- [x] T008 [P] Implement system detection utilities in src/HsJupyter/CLI/Utilities.hs
+- [x] T009 [P] Implement configuration management in src/HsJupyter/CLI/Configuration.hs
+- [x] T010 Create unit tests for core data models in test/unit/CLITypesSpec.hs
 - [ ] T011 [P] Create unit tests for system detection in test/unit/SystemIntegrationSpec.hs
 
 ---
@@ -165,12 +165,14 @@ Each user story must be independently testable:
 ## Parallel Execution Examples
 
 ### Setup Phase (4 parallel tasks)
+
 ```bash
 # These can run simultaneously:
 T002, T003, T004, T005
 ```
 
 ### User Story 1 Implementation (7 parallel tasks)
+
 ```bash
 # After T012-T013 complete, these can run in parallel:
 T014, T015, T016, T017, T022
@@ -179,6 +181,7 @@ T019, T020, T021 (constitutional integration)
 ```
 
 ### User Story 2 Implementation (4 parallel tasks)
+
 ```bash
 # After T025 complete:
 T026, T027, T028, T029
@@ -189,6 +192,7 @@ T026, T027, T028, T029
 ### MVP Delivery (User Story 1 Only)
 
 Focus on tasks T001-T024 for initial delivery:
+
 - Basic `hs-jupyter-kernel install` functionality
 - Constitutional compliance (error handling, logging, resource management)
 - Unit and integration tests
@@ -197,6 +201,7 @@ Focus on tasks T001-T024 for initial delivery:
 ### Incremental Delivery
 
 Each user story builds incrementally:
+
 1. **MVP**: Core installation (US1)
 2. **V1.1**: Add diagnostics (US1 + US2)  
 3. **V1.2**: Add customization (US1 + US2 + US3)
@@ -205,12 +210,14 @@ Each user story builds incrementally:
 ### Risk Mitigation
 
 **Medium Risk Items** (extra attention needed):
+
 - T008: Cross-platform path handling for various Jupyter installations
 - T016: Jupyter environment detection across Python installations (conda, pip, system)
 - T018: Permission handling for user vs system installation modes
 - T042: Cross-platform compatibility validation
 
 **Constitutional Compliance Tasks** (must pass constitutional gates):
+
 - T006: Error handling integration
 - T019-T021: ResourceGuard, logging, cancellation patterns
 - T041: Performance targets validation
