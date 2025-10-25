@@ -6,7 +6,7 @@ This guide helps contributors understand the project structure, runtime core arc
 
 ### Repository Layout
 
-```
+```text
 HsJupyter/
 ├── src/HsJupyter/
 │   ├── Bridge/              # ZeroMQ protocol layer (Phase 1)
@@ -66,7 +66,7 @@ cabal test unit -O0 --test-option="--match=/GHCSession/"
 
 Add to `~/.cabal/config` or project `cabal.project`:
 
-```
+```cabal
 -- Performance optimizations
 jobs: 4
 documentation: False
@@ -110,6 +110,28 @@ time cabal build lib:hs-jupyter-kernel -O0
 ```
 
 ## Runtime Core Architecture
+
+## Running the Prototype
+
+- Entry point: `app/KernelMain.hs`
+- CLI:
+  - `--connection FILE` points to a Jupyter connection JSON (see `scripts/demo/sample-connection.json`).
+  - `--log-level Debug|Info|Warn|Error` or env `HSJUPYTER_LOG_LEVEL`.
+
+Example:
+
+```bash
+cabal v2-run hs-jupyter-kernel -- \
+  --connection scripts/demo/sample-connection.json \
+  --log-level Info
+```
+
+Relevant modules:
+
+- Kernel: `src/HsJupyter/KernelProcess.hs`, `src/HsJupyter/Kernel/Types.hs`
+- Bridge: `src/HsJupyter/Bridge/{JupyterBridge,HeartbeatThread}.hs`, Protocol `{Envelope,Codec}.hs`
+- Router: `src/HsJupyter/Router/RequestRouter.hs`
+- Runtime: `src/HsJupyter/Runtime/{Manager,GHCSession,GHCRuntime,Evaluation,Diagnostics,Telemetry,ErrorHandling,ResourceGuard,SessionState}.hs`
 
 ### Job Queue System
 
@@ -429,7 +451,7 @@ let efficientConfig = ResourceConfig
 
 **Queue Capacity Exceeded:**
 
-```
+```text
 RuntimeManagerException: Queue capacity (5) exceeded
 ```
 
@@ -439,7 +461,7 @@ RuntimeManagerException: Queue capacity (5) exceeded
 
 **Memory Limit Violations:**
 
-```
+```text
 ResourceViolation: MemoryViolation 1024 512
 ```
 
@@ -449,7 +471,7 @@ ResourceViolation: MemoryViolation 1024 512
 
 **Timeout Errors:**
 
-```
+```text
 ResourceViolation: TimeoutViolation 35.2 30.0
 ```
 

@@ -48,3 +48,17 @@ secrets/
 # Test artifacts
 coverage/
 .coverage
+.stack-work/
+*.chi
+*.chs.h
+*.dyn_o
+*.dyn_hi
+*.swo
+*~
+.idea/
+.vscode/
+.mypy_cache/
+.pytest_cache/
+.cache/
+*.egg-info/
+.venv/

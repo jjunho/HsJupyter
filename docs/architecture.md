@@ -4,10 +4,10 @@ This document outlines a lean, modular architecture for a high-performance Haske
 
 ## High-Level Flow
 
-1. `KernelProcess` boots, loads configuration, and wires logging/metrics.
-2. `JupyterBridge` binds ZeroMQ sockets, validates envelopes, and produces typed protocol events.
-3. `RequestRouter` dispatches each event to a capability handler (execute, complete, inspect, etc.).
-4. `RuntimeManager` evaluates Haskell code through a persistent GHC session and streams outputs.
+1. `KernelProcess` boots, loads configuration, and wires logging/metrics. See `src/HsJupyter/KernelProcess.hs` and CLI in `app/KernelMain.hs`.
+2. `JupyterBridge` binds ZeroMQ sockets, validates envelopes, and produces typed protocol events. See `src/HsJupyter/Bridge/JupyterBridge.hs` plus `Protocol.{Envelope,Codec}`.
+3. `RequestRouter` dispatches each event to a capability handler (execute, complete, inspect, etc.). Current scaffold at `src/HsJupyter/Router/RequestRouter.hs`.
+4. `RuntimeManager` evaluates Haskell code through a persistent GHC session and streams outputs. See `src/HsJupyter/Runtime/{Manager,GHCSession,GHCRuntime,Evaluation}.hs`.
 5. Results flow back through `JupyterBridge` as structured Jupyter messages.
 
 The same pipeline handles control messages (interrupt, shutdown) and capability-specific flows such as completions and widgets.
@@ -32,7 +32,7 @@ The same pipeline handles control messages (interrupt, shutdown) and capability-
 
 - Owns ZeroMQ sockets for shell, iopub, control, stdin channels.
 - Prototype module lives at `src/HsJupyter/Bridge/JupyterBridge.hs`, binding ZeroMQ sockets, verifying HMAC signatures, and translating multipart frames into typed envelopes for the Phase 1 echo runtime.
-- Provides codec layer (`HsJupyter.Protocol.JSON`) with typed message records, avoiding ad-hoc JSON handling.
+- Provides codec layer via `src/HsJupyter/Bridge/Protocol/{Envelope,Codec}.hs` with typed message records, avoiding ad-hoc JSON handling.
 - Validates signatures, message order, and routing metadata before passing requests to the router.
 - Serialises replies/outputs from typed data back into Jupyter wire format.
 
@@ -44,7 +44,7 @@ The same pipeline handles control messages (interrupt, shutdown) and capability-
 
 ### RuntimeManager
 
-- Wraps a long-lived GHC session (via `hint` or direct GHC API).
+- Wraps a long-lived GHC session (via `hint`), implemented across `GHCSession`, `GHCRuntime`, and `Evaluation` modules.
 - Compiles cells incrementally, tracks module state in `DynamicScope`, and exposes soft resets.
 - Streams stdout/stderr via callbacks; collects rich results into `ExecutionOutcome`.
 - Enforces resource limits in cooperation with `RuntimeSupervisor`.
