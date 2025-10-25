@@ -3,6 +3,8 @@
 module DiagnosticsSpec (spec) where
 
 import Data.Aeson (decode, encode)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Test.Hspec
 
 import HsJupyter.Runtime.Diagnostics
@@ -203,3 +205,171 @@ spec = describe "Runtime Diagnostics" $ do
                             [ d | d <- diagnostics, rdSeverity d == SeverityInfo ]
       
       map rdSeverity sortedBySeverity `shouldBe` [SeverityError, SeverityWarning, SeverityInfo]
+
+  describe "enhanced error translation scenarios" $ do
+    it "handles GHC parse errors with detailed span information" $ do
+      let parseError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Parse error: unexpected token"
+            , rdDetail = Just "parse error on input 'where'\nPerhaps you meant to use BlockArguments?"
+            , rdSpan = Just $ DiagnosticSpan (Just "Cell.hs") (Just 12) (Just 15) (Just 12) (Just 20)
+            , rdSuggestions = ["Enable BlockArguments extension", "Check syntax around 'where' clause"]
+            , rdSource = Just "ghc-parser"
+            }
+      
+      rdSeverity parseError `shouldBe` SeverityError
+      rdSummary parseError `shouldBe` "Parse error: unexpected token"
+      rdSpan parseError `shouldSatisfy` (\span -> case span of
+        Just s -> spanStartLine s == Just 12 && spanStartCol s == Just 15
+        Nothing -> False)
+
+    it "handles type checking errors with context" $ do
+      let typeError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Couldn't match expected type"
+            , rdDetail = Just "Couldn't match expected type 'Int' with actual type '[Char]'\nIn the expression: \"hello\"\nIn an equation for 'x'"
+            , rdSpan = Just $ DiagnosticSpan (Just "Cell.hs") (Just 3) (Just 5) (Just 3) (Just 12)
+            , rdSuggestions = ["Use 'read \"hello\"' if you meant to parse", "Change type signature", "Use a string type instead"]
+            , rdSource = Just "ghc-typechecker"
+            }
+      
+      rdDetail typeError `shouldSatisfy` (\detail -> case detail of
+        Just d -> T.isInfixOf "Couldn't match expected type" d
+        Nothing -> False)
+
+    it "handles module import errors" $ do
+      let importError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Could not find module"
+            , rdDetail = Just "Could not find module 'Data.NonExistent'\nUse -v to see a list of the files searched for."
+            , rdSpan = Just $ DiagnosticSpan (Just "Cell.hs") (Just 1) (Just 1) (Just 1) (Just 25)
+            , rdSuggestions = ["Check module name spelling", "Install required package", "Add module to dependencies"]
+            , rdSource = Just "ghc-modules"
+            }
+      
+      rdSummary importError `shouldBe` "Could not find module"
+      length (rdSuggestions importError) `shouldBe` 3
+
+    it "handles runtime exceptions with stack traces" $ do
+      let runtimeException = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Exception: Prelude.head: empty list"
+            , rdDetail = Just "*** Exception: Prelude.head: empty list\nCallStack (from HasCallStack):\n  error, called at libraries/base/GHC/List.hs:1646:3"
+            , rdSpan = Nothing -- Runtime errors typically don't have source spans
+            , rdSuggestions = ["Use 'listToMaybe' instead of 'head'", "Check list is non-empty before calling head", "Handle the exception"]
+            , rdSource = Just "ghc-runtime"
+            }
+      
+      rdSeverity runtimeException `shouldBe` SeverityError
+      rdSpan runtimeException `shouldBe` Nothing
+
+    it "handles timeout errors" $ do
+      let timeoutError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Evaluation timeout"
+            , rdDetail = Just "Code execution exceeded the 10 second timeout limit"
+            , rdSpan = Nothing
+            , rdSuggestions = ["Optimize algorithm for better performance", "Increase timeout limit", "Check for infinite loops"]
+            , rdSource = Just "runtime-guard"
+            }
+      
+      rdSummary timeoutError `shouldBe` "Evaluation timeout"
+      rdSource timeoutError `shouldBe` Just "runtime-guard"
+
+    it "handles resource limit violations" $ do
+      let memoryError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Memory limit exceeded"
+            , rdDetail = Just "Process exceeded memory limit of 512MB (used: 756MB)"
+            , rdSpan = Nothing
+            , rdSuggestions = ["Reduce memory usage", "Use streaming operations", "Increase memory limit"]
+            , rdSource = Just "resource-guard"
+            }
+      
+      rdSummary memoryError `shouldBe` "Memory limit exceeded"
+      rdDetail memoryError `shouldSatisfy` (\detail -> case detail of
+        Just d -> T.isInfixOf "512MB" d
+        Nothing -> False)
+
+  describe "diagnostic severity classification" $ do
+    it "correctly classifies compilation errors as Error severity" $ do
+      let compileErrors = 
+            [ mkError "Parse error"
+            , mkError "Type mismatch"
+            , mkError "Variable not in scope"
+            ]
+      
+      all ((== SeverityError) . rdSeverity) compileErrors `shouldBe` True
+
+    it "correctly classifies warnings as Warning severity" $ do
+      let warnings = 
+            [ mkWarning "Unused variable"
+            , mkWarning "Redundant import"
+            , mkWarning "Missing type signature"
+            ]
+      
+      all ((== SeverityWarning) . rdSeverity) warnings `shouldBe` True
+
+    it "correctly classifies informational messages" $ do
+      let infoMessages = 
+            [ mkInfo "Compilation started"
+            , mkInfo "Loading package"
+            , mkInfo "Compilation completed"
+            ]
+      
+      all ((== SeverityInfo) . rdSeverity) infoMessages `shouldBe` True
+
+  describe "suggestion system" $ do
+    it "provides helpful suggestions for common errors" $ do
+      let undefinedVarError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Variable not in scope: xyz"
+            , rdDetail = Nothing
+            , rdSpan = Just $ DiagnosticSpan (Just "Cell.hs") (Just 5) (Just 10) (Just 5) (Just 13)
+            , rdSuggestions = ["Define variable 'xyz'", "Import module containing 'xyz'", "Check spelling of variable name"]
+            , rdSource = Just "ghc"
+            }
+      
+      length (rdSuggestions undefinedVarError) `shouldBe` 3
+      "Define variable" `shouldSatisfy` (\text -> any (T.isInfixOf text) (rdSuggestions undefinedVarError))
+
+    it "provides context-specific suggestions" $ do
+      let invalidSyntaxError = RuntimeDiagnostic
+            { rdSeverity = SeverityError
+            , rdSummary = "Invalid syntax"
+            , rdDetail = Just "Expected '=' but found '=='"
+            , rdSpan = Just $ DiagnosticSpan (Just "Cell.hs") (Just 2) (Just 8) (Just 2) (Just 10)
+            , rdSuggestions = ["Use '=' for assignment", "Use '==' for comparison in conditionals"]
+            , rdSource = Just "ghc-parser"
+            }
+      
+      rdSuggestions invalidSyntaxError `shouldSatisfy` (elem "Use '=' for assignment")
+
+    it "can have empty suggestions for some diagnostics" $ do
+      let internalError = mkError "Internal compiler error"
+      
+      rdSuggestions internalError `shouldBe` []
+
+  describe "JSON serialization edge cases" $ do
+    it "handles diagnostics with unicode characters" $ do
+      let unicodeError = mkError "Parse error: unexpected '→' symbol"
+          encoded = encode unicodeError
+          decoded = decode encoded
+      
+      decoded `shouldBe` Just unicodeError
+
+    it "handles very long error messages" $ do
+      let longMessage = T.replicate 1000 "x"
+          longError = mkError longMessage
+          encoded = encode longError
+          decoded = decode encoded
+      
+      decoded `shouldBe` Just longError
+      rdSummary <$> decoded `shouldBe` Just longMessage
+
+    it "handles empty suggestion lists correctly" $ do
+      let diagnostic = mkWarning "Simple warning"
+          encoded = encode diagnostic
+          decoded = decode encoded
+      
+      rdSuggestions <$> decoded `shouldBe` Just []

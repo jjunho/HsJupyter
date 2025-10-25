@@ -38,11 +38,75 @@ HsJupyter/
 ```bash
 git clone https://github.com/jjunho/HsJupyter.git
 cd HsJupyter
-git checkout 002-runtime-core  # Latest runtime implementation
+git checkout 003-ghc-evaluation  # Latest GHC evaluation implementation
 
 # Build and test
 cabal v2-build all
 cabal v2-test all
+```
+
+### Build Performance Optimization
+
+Due to the **hint library** (GHC API integration), full builds can take several minutes. For faster development iteration:
+
+**⚡ Fast Development Builds:**
+
+```bash
+# Library only (5 seconds vs minutes)
+cabal build lib:hs-jupyter-kernel -O0
+
+# Quick compilation check
+cabal build --dependencies-only
+
+# Specific test suites only
+cabal test unit -O0 --test-option="--match=/GHCSession/"
+```
+
+**🔧 Build Configuration Optimizations:**
+
+Add to `~/.cabal/config` or project `cabal.project`:
+
+```
+-- Performance optimizations
+jobs: 4
+documentation: False
+haddock-all: False
+optimization: 1
+split-sections: True
+```
+
+**🚀 Development Workflow:**
+
+```bash
+# 1. Quick compilation check
+cabal build lib:hs-jupyter-kernel -O0
+
+# 2. Run targeted tests
+cabal test unit -O0 --test-option="--match=/MyModule/"
+
+# 3. Full integration (when needed)
+cabal test integration -O0
+
+# 4. Production build (final step)
+cabal build  # With optimizations
+```
+
+**Why Builds Are Slow:**
+
+- **hint library**: Includes full GHC API (~100MB+ dependencies)
+- **Static linking**: Combines all libraries into executable
+- **292 dependencies**: Large dependency graph
+- **GHC 9.12.2**: Newer versions can be slower
+
+**Performance Tools:**
+
+```bash
+# Install ghcid for instant feedback
+cabal install ghcid
+ghcid --command="cabal repl lib:hs-jupyter-kernel"
+
+# Monitor build times
+time cabal build lib:hs-jupyter-kernel -O0
 ```
 
 ## Runtime Core Architecture
@@ -62,6 +126,7 @@ data RuntimeManager = RuntimeManager
 ```
 
 **Key Operations:**
+
 - `submitExecute`: Enqueue code execution with cancellation token
 - `enqueueInterrupt`: Cancel running job by ID
 - `withRuntimeManager`: Resource-managed lifecycle
@@ -81,6 +146,7 @@ data RuntimeSessionState = RuntimeSessionState
 ```
 
 **State Lifecycle:**
+
 1. Initialize empty state on runtime startup
 2. Increment execution count per cell
 3. Accumulate bindings and imports
@@ -102,6 +168,7 @@ data ResourceLimits = ResourceLimits
 ```
 
 **Enforcement Mechanisms:**
+
 - Background monitoring thread with configurable intervals
 - RTS statistics integration for memory tracking
 - STM-based cancellation propagation
@@ -124,8 +191,9 @@ checkCancellation token = do
 ```
 
 **Cancellation Flow:**
+
 1. Client sends `interrupt_request`
-2. RequestRouter calls `enqueueInterrupt` 
+2. RequestRouter calls `enqueueInterrupt`
 3. Manager marks job's TMVar
 4. Evaluation engine checks token periodically
 5. Returns `status=abort` on cancellation
@@ -152,12 +220,14 @@ git push -u origin 003-feature-name
 ### Code Quality Standards
 
 **Haskell Style:**
+
 - Four-space indentation
 - `HsJupyter.*` module namespace
 - Total functions preferred over partial
 - Haddock comments for public APIs
 
 **Testing Requirements:**
+
 - Unit tests for all new modules
 - Integration tests for user-facing features
 - Property-based testing for pure functions
@@ -358,25 +428,31 @@ let efficientConfig = ResourceConfig
 ### Common Issues
 
 **Queue Capacity Exceeded:**
+
 ```
 RuntimeManagerException: Queue capacity (5) exceeded
 ```
+
 - Increase queue capacity in `withRuntimeManager`
 - Implement backpressure in client code
 - Consider batching or rate limiting
 
 **Memory Limit Violations:**
+
 ```
 ResourceViolation: MemoryViolation 1024 512
 ```
+
 - Increase `rcMaxMemoryMB` limit
 - Check for memory leaks in evaluation code
 - Profile with `+RTS -h` for heap analysis
 
 **Timeout Errors:**
+
 ```
 ResourceViolation: TimeoutViolation 35.2 30.0
 ```
+
 - Increase `rcMaxCpuSeconds` for long computations
 - Add cancellation checks in evaluation loops
 - Consider breaking work into smaller chunks
@@ -384,12 +460,14 @@ ResourceViolation: TimeoutViolation 35.2 30.0
 ### Debugging Techniques
 
 **STM Deadlock Detection:**
+
 ```bash
 # Run with STM debugging
 cabal v2-run hs-jupyter-kernel +RTS -xc
 ```
 
 **Resource Monitoring:**
+
 ```haskell
 -- Add custom telemetry
 import HsJupyter.Runtime.Telemetry
@@ -402,6 +480,7 @@ logResourceUsage guard = do
 ```
 
 **Cancellation Debugging:**
+
 ```haskell
 -- Log cancellation events
 debugCancellation :: TMVar () -> Text -> IO ()

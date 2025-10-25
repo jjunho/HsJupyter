@@ -216,10 +216,9 @@ spec = describe "Resource Guards" $ do
     it "enforces limits through guard" $ do
       let limits = defaultResourceLimits { rcMaxCpuSeconds = 0.1 }
       
-      result <- (try $ withResourceGuard limits $ \_ -> do
+      result <- (try :: IO String -> IO (Either SomeException String)) $ withResourceGuard limits $ \_ -> do
         threadDelay 300000  -- Should be terminated
-        return "should not complete")
-        :: IO (Either ResourceViolation String)
+        return "should not complete"
       
       case result of
         Left _ex -> return ()  -- Expected exception

@@ -6,7 +6,15 @@ HsJupyter is documentation-first while the kernel takes shape. Keep architecture
 
 ## Build, Test, and Development Commands
 
-Use a GHC toolchain installed via `ghcup` (`ghcup install ghc 9.6.4 cabal`) before standing up prototypes. Build emerging packages with `cabal v2-build` or `cabal v2-repl` and record any extra flags in your PR. Run documentation checks locally—`markdownlint docs/**/*.md README.md`—to keep the published guides consistent. Prototype scripts (e.g., ZeroMQ harnesses) should live under `.specify/scripts/` with executable bits set (`chmod +x .specify/scripts/dev-kernel.sh`) and usage documented.
+Use a GHC toolchain installed via `ghcup` (`ghcup install ghc 9.12.2 cabal`) before standing up prototypes.
+
+**⚡ Performance Note**: Full builds take several minutes due to the hint library (GHC API). For faster development:
+
+- `cabal build lib:hs-jupyter-kernel -O0` (5 seconds vs minutes)
+- `cabal test unit -O0 --test-option="--match=/ModuleName/"` (targeted tests)
+- Configure `jobs: 4` and `documentation: False` in cabal.project for parallel builds
+
+Build emerging packages with `cabal v2-build` or `cabal v2-repl` and record any extra flags in your PR. Run documentation checks locally—`markdownlint docs/**/*.md README.md`—to keep the published guides consistent. Prototype scripts (e.g., ZeroMQ harnesses) should live under `.specify/scripts/` with executable bits set (`chmod +x .specify/scripts/dev-kernel.sh`) and usage documented.
 
 ## Coding Style & Naming Conventions
 
@@ -25,6 +33,7 @@ Write commit subjects in the imperative mood (`Add runtime manager sketch`) and 
 Codex agents must follow the Specify toolkit prompts before running `/speckit` commands: review the matching files in `.codex/prompts/` (`speckit.specify.md`, `speckit.plan.md`, `speckit.tasks.md`, `speckit.implement.md`) and apply their checklists verbatim. Always invoke the helper scripts under `.specify/scripts/bash/` from the repo root with the documented flags, keep feature branches numbered (`001-name`), and update generated checklists when validation status changes.
 
 ## Active Technologies
+
 - Haskell with GHC 9.12.2 via ghcup + hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm (003-ghc-evaluation)
 - In-memory interpreter state (hint InterpreterT monad) (003-ghc-evaluation)
 

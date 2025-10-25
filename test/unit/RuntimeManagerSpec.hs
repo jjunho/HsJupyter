@@ -2,10 +2,8 @@
 
 module RuntimeManagerSpec (spec) where
 
-import Control.Concurrent.STM (newEmptyTMVarIO, putTMVar, readTMVar, atomically)
 import Data.Aeson (object)
 import Data.Text (Text)
-import Data.Time.Clock (getCurrentTime)
 import Test.Hspec
 
 import HsJupyter.Runtime.Manager

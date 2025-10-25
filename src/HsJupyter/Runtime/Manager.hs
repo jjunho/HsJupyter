@@ -4,6 +4,7 @@ module HsJupyter.Runtime.Manager
   ( RuntimeManager(..)
   , withRuntimeManager
   , submitExecute
+  , submitGHCExecute
   , enqueueInterrupt
   ) where
 
@@ -34,7 +35,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
-import GHC.Natural (Natural)
+
 
 import HsJupyter.Runtime.Evaluation (evaluateCell)
 import HsJupyter.Runtime.SessionState
@@ -42,30 +43,37 @@ import HsJupyter.Runtime.SessionState
   , ExecutionJob(..)
   , ExecutionOutcome(..)
   , JobMetadata(..)
+  , JobType(..)
   , RuntimeSessionState
   , initialSessionState
   , ResourceBudget(..)
   )
+import HsJupyter.Runtime.GHCSession (GHCSessionState)
+import HsJupyter.Runtime.GHCRuntime (defaultGHCConfig)
 
 -- | Handle exposed to router/kernel for submitting jobs and interrupts.
 data RuntimeManager = RuntimeManager
   { rmSubmit :: ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome
+  , rmSubmitGHC :: ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome
   , rmInterrupt :: Text -> IO ()
   }
 
 submitExecute :: RuntimeManager -> ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome
 submitExecute mgr = rmSubmit mgr
 
+submitGHCExecute :: RuntimeManager -> ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome
+submitGHCExecute mgr = rmSubmitGHC mgr
+
 enqueueInterrupt :: RuntimeManager -> Text -> IO ()
 enqueueInterrupt mgr = rmInterrupt mgr
 
 withRuntimeManager
   :: ResourceBudget
-  -> Natural -- ^ queue capacity
+  -> Int -- ^ queue capacity  
   -> (RuntimeManager -> IO a)
   -> IO a
 withRuntimeManager budget capacity action = do
-  queue <- newTBQueueIO capacity
+  queue <- newTBQueueIO (fromIntegral capacity)
   cancelMap <- newTVarIO Map.empty
   stateVar <- newTVarIO (initialSessionState budget)
   bracket (spawnWorker queue cancelMap stateVar)
@@ -80,6 +88,7 @@ manager
 manager queue cancelMap _stateVar =
   RuntimeManager
     { rmSubmit = submit queue cancelMap
+    , rmSubmitGHC = submitGHCExecuteInternal queue cancelMap
     , rmInterrupt = cancelJob cancelMap
     }
 
@@ -107,6 +116,32 @@ submit queue cancelMap ctx metadata source = do
         , jobSubmittedAt = submittedAt
         , jobMetadata = metadata
         , jobCancelToken = cancelToken
+        , jobType = EchoJob  -- Default to EchoJob for backward compatibility, GHC support added later
+        }
+  atomically $ do
+    modifyTVar' cancelMap (Map.insert (ecMessageId ctx) cancelToken)
+    writeTBQueue queue (job, replyVar)
+  atomically (takeTMVar replyVar)
+
+-- | Internal GHC submit function
+submitGHCExecuteInternal
+  :: TBQueue (ExecutionJob, TMVar ExecutionOutcome)
+  -> TVar (Map Text (TMVar ()))
+  -> ExecuteContext
+  -> JobMetadata
+  -> Text
+  -> IO ExecutionOutcome
+submitGHCExecuteInternal queue cancelMap ctx metadata source = do
+  cancelToken <- newEmptyTMVarIO
+  replyVar <- newEmptyTMVarIO
+  submittedAt <- getCurrentTime
+  let job = ExecutionJob
+        { jobContext = ctx
+        , jobSource = source
+        , jobSubmittedAt = submittedAt
+        , jobMetadata = metadata
+        , jobCancelToken = cancelToken
+        , jobType = GHCJob  -- Use GHC evaluation
         }
   atomically $ do
     modifyTVar' cancelMap (Map.insert (ecMessageId ctx) cancelToken)

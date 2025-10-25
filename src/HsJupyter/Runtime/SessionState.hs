@@ -9,6 +9,7 @@ module HsJupyter.Runtime.SessionState
   , JobMetadata(..)
   , ExecuteContext(..)
   , ExecutionJob(..)
+  , JobType(..)
   , RuntimeSessionState(..)
   , ModuleArtifact(..)
   , Binding(..)
@@ -74,8 +75,15 @@ data ExecutionJob = ExecutionJob
   , jobSubmittedAt :: UTCTime
   , jobMetadata    :: JobMetadata
   , jobCancelToken :: TMVar ()
+  , jobType        :: JobType  -- NEW: distinguish between Echo and GHC jobs
   }
   deriving stock Generic
+
+-- | Type of job execution (extending for GHC evaluation)
+data JobType
+  = EchoJob     -- Original echo-based evaluation
+  | GHCJob      -- NEW: GHC-based Haskell evaluation
+  deriving stock (Eq, Show, Generic)
 
 instance Show ExecutionJob where
   show job = "ExecutionJob {msgId=" ++ show (ecMessageId (jobContext job)) ++ "}"

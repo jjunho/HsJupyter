@@ -35,6 +35,10 @@ import HsJupyter.Bridge.JupyterBridge
   , logBridgeEvent
   , mkBridgeContext
   )
+import HsJupyter.Runtime.Manager
+  ( withRuntimeManager
+  )
+import HsJupyter.Runtime.SessionState (ResourceBudget(..))
 import HsJupyter.Bridge.Protocol.Codec
   ( EnvelopeFrameError(..)
   , parseEnvelopeFrames

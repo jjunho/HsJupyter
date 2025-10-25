@@ -47,7 +47,9 @@ import HsJupyter.Router.RequestRouter
   , routeExecuteRequest
   )
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic(..))
-import HsJupyter.Runtime.Manager (RuntimeManager)
+import HsJupyter.Runtime.Manager
+  ( RuntimeManager
+  )
 import HsJupyter.Runtime.SessionState
   ( ExecutionOutcome(..)
   , ExecutionStatus(..)
@@ -59,6 +61,7 @@ import HsJupyter.Runtime.SessionState
 data BridgeContext = BridgeContext
   { bridgeConfig   :: KernelProcessConfig
   , bridgeRouter   :: Router
+  , bridgeManager  :: RuntimeManager
   , bridgeRejected :: IORef Int
   }
 
@@ -74,6 +77,7 @@ mkBridgeContext cfg manager = do
   pure BridgeContext
     { bridgeConfig = cfg
     , bridgeRouter = mkRouter manager
+    , bridgeManager = manager
     , bridgeRejected = rejectedVar
     }
 
@@ -99,6 +103,21 @@ handleExecuteOnce ctx envelope = do
         outcome <- routeExecuteRequest (bridgeRouter ctx) typed
         pure (Right (outcomeEnvelopes typed outcome))
 
+    makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
+      let header = (envelopeHeader reqEnv) { msgType = "stream" }
+      in ProtocolEnvelope
+          { envelopeIdentities = [T.pack "stream"]
+          , envelopeHeader = header
+          , envelopeParent = Just (envelopeHeader reqEnv)
+          , envelopeMetadata = emptyMetadata
+          , envelopeContent = object
+              [ "name" .= name
+              , "text" .= text
+              ]
+          , envelopeSignature = ""
+          }
+
+-- | Produce an interrupt acknowledgement envelope.
 handleInterrupt
   :: BridgeContext
   -> ProtocolEnvelope Value
