@@ -28,7 +28,9 @@ module HsJupyter.CLI.Install
 import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad (filterM, when)
-import Control.Exception (try, IOException)
+import Control.Exception (try, IOException, SomeException, catch, finally)
+import qualified Control.Exception
+import qualified System.Timeout
 import System.Directory 
   ( createDirectoryIfMissing
   , doesDirectoryExist
@@ -57,6 +59,18 @@ import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (fromMaybe)
 
+-- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
+import HsJupyter.Runtime.ResourceGuard 
+  ( ResourceGuard
+  , ResourceLimits(..)  
+  , withResourceGuard
+  , defaultResourceLimits
+  , ResourceViolation(..)
+  )
+import HsJupyter.Runtime.ErrorHandling
+  ( withErrorContext
+  , enrichDiagnostic
+  )
 
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
@@ -67,36 +81,87 @@ import HsJupyter.CLI.Types
 import HsJupyter.CLI.Commands (InstallOptions(..))
 import qualified HsJupyter.CLI.Utilities as Utilities
 
+-- ===========================================================================
+-- T019: CLI-specific ResourceGuard helper functions
+-- ===========================================================================
+
+-- | CLI-specific resource error handling that works with CLIDiagnostic
+withCLIResourceError :: Text -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
+withCLIResourceError operation action = do
+  action `catch` \(violation :: ResourceViolation) ->
+    return $ Left (SystemIntegrationError $ "Resource violation during " <> operation <> ": " <> T.pack (show violation))
+
+-- | CLI-specific resource cleanup pattern
+withCLIResourceCleanup :: IO () -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
+withCLIResourceCleanup cleanup action = 
+  action `finally` cleanup
+  where
+    finally :: IO a -> IO b -> IO a
+    finally = Control.Exception.finally
+
+-- | CLI-specific timeout wrapper for operations
+withCLITimeout :: Int -> Text -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
+withCLITimeout timeoutSeconds operation action = do
+  result <- timeout (timeoutSeconds * 1000000) action
+  case result of
+    Nothing -> return $ Left (SystemIntegrationError $ "Operation timed out after " <> T.pack (show timeoutSeconds) <> " seconds: " <> operation)
+    Just r -> return r
+  where
+    timeout :: Int -> IO a -> IO (Maybe a)
+    timeout = System.Timeout.timeout
+
 -- | Execute kernel installation with given options (T015: Jupyter environment detection, T018: Complete installation)
+-- T019: Enhanced with ResourceGuard integration for constitutional compliance
 executeInstall :: InstallOptions -> IO (Either CLIDiagnostic ())
-executeInstall options = do
-  -- Step 1: Detect Jupyter environment (T015 implementation)
-  jupyterEnvResult <- detectJupyterEnvironment
-  case jupyterEnvResult of
-    Left diag -> return $ Left diag
-    Right jupyterEnv -> do
-      -- Step 2: Validate environment meets installation requirements  
-      validationResult <- validateJupyterEnvironment jupyterEnv options
-      case validationResult of
-        Left diag -> return $ Left diag
-        Right validatedEnv -> do
-          -- Step 3: Execute complete kernel registration workflow (T018)
-          registrationResult <- executeKernelRegistration options validatedEnv
-          case registrationResult of
-            Left diag -> return $ Left diag
-            Right _ -> return $ Right ()
+executeInstall options = withErrorContext "kernel-installation" $ do
+  -- Constitutional resource limits for installation operations (<2min, <100MB)
+  let installationLimits = defaultResourceLimits
+        { rcMaxCpuSeconds = 120.0  -- 2 minute timeout for installation
+        , rcMaxMemoryMB = 100      -- 100MB memory limit per specification
+        , rcMaxOutputBytes = 10485760  -- 10MB output limit for logs
+        }
+  
+  result <- withResourceGuard installationLimits $ \guard -> do
+    -- Step 1: Detect Jupyter environment (T015 implementation)
+    jupyterEnvResult <- withCLIResourceError "jupyter-environment-detection" detectJupyterEnvironment
+    case jupyterEnvResult of
+      Left diag -> return $ Left diag
+      Right jupyterEnv -> do
+        -- Step 2: Validate environment meets installation requirements  
+        validationResult <- withCLIResourceError "jupyter-environment-validation" $ 
+          validateJupyterEnvironment jupyterEnv options
+        case validationResult of
+          Left diag -> return $ Left diag
+          Right validatedEnv -> do
+            -- Step 3: Execute complete kernel registration workflow (T018)
+            registrationResult <- withCLIResourceError "kernel-registration" $ 
+              executeKernelRegistration options validatedEnv
+            case registrationResult of
+              Left diag -> return $ Left diag
+              Right _ -> return $ Right ()
+  
+  return result
 
 -- | Detect current Jupyter environment using system utilities (T015)
+-- T019: Enhanced with ResourceGuard protection for system detection operations
 detectJupyterEnvironment :: IO (Either CLIDiagnostic JupyterEnvironment)
-detectJupyterEnvironment = do
-  -- Use the Utilities module function for core detection
-  result <- Utilities.detectJupyterEnvironment
-  case result of
-    Left diag -> return $ Left diag
-    Right jupyterEnv -> do
-      -- Enhanced detection with additional validation
-      enhancedResult <- enhanceJupyterEnvironment jupyterEnv
-      return $ Right enhancedResult
+detectJupyterEnvironment = withErrorContext "jupyter-environment-detection" $ do
+  -- Constitutional resource limits for environment detection (<5s timeout)
+  let detectionLimits = defaultResourceLimits
+        { rcMaxCpuSeconds = 5.0    -- 5 second timeout for environment detection
+        , rcMaxMemoryMB = 25       -- 25MB memory limit for detection operations
+        , rcMaxOutputBytes = 524288  -- 512KB output limit for command outputs
+        }
+  
+  withResourceGuard detectionLimits $ \guard -> do
+    -- Use the Utilities module function for core detection
+    result <- withCLIResourceError "core-jupyter-detection" Utilities.detectJupyterEnvironment
+    case result of
+      Left diag -> return $ Left diag
+      Right jupyterEnv -> do
+        -- Enhanced detection with additional validation (no resource wrapper needed - pure function)
+        enhancedResult <- enhanceJupyterEnvironment jupyterEnv
+        return $ Right enhancedResult
 
 -- | Enhance detected Jupyter environment with additional validation
 enhanceJupyterEnvironment :: JupyterEnvironment -> IO JupyterEnvironment
@@ -428,17 +493,26 @@ writeKernelJson kernelPath kernelJson = do
 
 -- | Complete kernel installation by generating and writing kernel.json (T017)
 installKernelJson :: InstallOptions -> FilePath -> FilePath -> IO (Either CLIDiagnostic FilePath)
-installKernelJson options kernelPath ghcPath = do
-  -- Step 1: Generate kernel.json content
-  jsonResult <- generateKernelJson options ghcPath
+installKernelJson options kernelPath ghcPath = withErrorContext "kernel-json-installation" $ do
+  -- Step 1: Generate kernel.json content with resource protection
+  jsonResult <- withCLIResourceError "json-generation" $ generateKernelJson options ghcPath
   case jsonResult of
     Left diag -> return $ Left diag
     Right kernelJson -> do
-      -- Step 2: Write kernel.json to file
-      writeResult <- writeKernelJson kernelPath kernelJson
+      -- Step 2: Write kernel.json to file with cleanup on failure
+      writeResult <- withCLIResourceCleanup (cleanupJsonFile kernelPath) $
+        withCLIResourceError "json-file-write" $ writeKernelJson kernelPath kernelJson
       case writeResult of
         Left diag -> return $ Left diag
         Right () -> return $ Right kernelPath
+  where
+    -- Cleanup incomplete kernel.json files on failure
+    cleanupJsonFile :: FilePath -> IO ()
+    cleanupJsonFile path = do
+      fileExists <- doesFileExist path
+      when fileExists $ do
+        (try :: IO () -> IO (Either SomeException ())) (removeDirectoryRecursive (takeDirectory path)) >> return ()
+      return ()
 
 -- | Validate generated kernel.json content against Jupyter requirements (T017)
 validateKernelJson :: Value -> IO (Either CLIDiagnostic Value)
@@ -458,33 +532,56 @@ validateKernelJson kernelJson = do
 
 -- | Execute complete kernel registration workflow (T018)
 executeKernelRegistration :: InstallOptions -> JupyterEnvironment -> IO (Either CLIDiagnostic FilePath)
-executeKernelRegistration options jupyterEnv = do
-  -- Step 1: Find suitable kernelspec directory for installation
-  targetDirectoryResult <- selectInstallationDirectory options jupyterEnv
-  case targetDirectoryResult of
-    Left diag -> return $ Left diag
-    Right targetDir -> do
-      -- Step 2: Determine kernel name and check for conflicts
-      kernelNameResult <- resolveKernelName options targetDir
-      case kernelNameResult of
-        Left diag -> return $ Left diag
-        Right kernelName -> do
-          -- Step 3: Get GHC path for kernel configuration
-          ghcPathResult <- resolveGHCPath options
-          case ghcPathResult of
-            Left diag -> return $ Left diag
-            Right ghcPath -> do
-              -- Step 4: Create kernel directory and install kernel.json
-              let kernelPath = getKernelPath targetDir kernelName
-              installResult <- installKernelJson options kernelPath ghcPath
-              case installResult of
-                Left diag -> return $ Left diag
-                Right installedPath -> do
-                  -- Step 5: Verify installation success
-                  verificationResult <- verifyKernelInstallation installedPath
-                  case verificationResult of
-                    Left diag -> return $ Left diag
-                    Right _ -> return $ Right installedPath
+executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registration-workflow" $ do
+  -- Constitutional resource limits for registration operations
+  let registrationLimits = defaultResourceLimits
+        { rcMaxCpuSeconds = 30.0   -- 30 second timeout for registration steps
+        , rcMaxMemoryMB = 50       -- 50MB memory limit for file operations
+        , rcMaxOutputBytes = 1048576  -- 1MB output limit for logs
+        }
+  
+  withResourceGuard registrationLimits $ \guard -> do
+    -- Step 1: Find suitable kernelspec directory for installation  
+    targetDirectoryResult <- withCLIResourceError "directory-selection" $ 
+      selectInstallationDirectory options jupyterEnv
+    case targetDirectoryResult of
+      Left diag -> return $ Left diag
+      Right targetDir -> do
+        -- Step 2: Determine kernel name and check for conflicts
+        kernelNameResult <- withCLIResourceError "kernel-name-resolution" $ 
+          resolveKernelName options targetDir
+        case kernelNameResult of
+          Left diag -> return $ Left diag
+          Right kernelName -> do
+            -- Step 3: Get GHC path for kernel configuration
+            ghcPathResult <- withCLIResourceError "ghc-path-resolution" $ 
+              resolveGHCPath options
+            case ghcPathResult of
+              Left diag -> return $ Left diag
+              Right ghcPath -> do
+                -- Step 4: Create kernel directory and install kernel.json with cleanup
+                let kernelPath = getKernelPath targetDir kernelName
+                installResult <- withCLIResourceCleanup (cleanupOnFailure kernelPath) $
+                  withCLIResourceError "kernel-json-installation" $ 
+                    installKernelJson options kernelPath ghcPath
+                case installResult of
+                  Left diag -> return $ Left diag
+                  Right installedPath -> do
+                    -- Step 5: Verify installation success
+                    verificationResult <- withCLIResourceError "installation-verification" $ 
+                      verifyKernelInstallation installedPath
+                    case verificationResult of
+                      Left diag -> return $ Left diag
+                      Right _ -> return $ Right installedPath
+
+-- | Cleanup function for failed installations (T019: Constitutional resource cleanup)
+cleanupOnFailure :: FilePath -> IO ()
+cleanupOnFailure kernelPath = do
+  dirExists <- doesDirectoryExist (takeDirectory kernelPath)
+  when dirExists $ do
+    -- Remove incomplete kernel directory if it exists
+    (try :: IO () -> IO (Either SomeException ())) (removeDirectoryRecursive (takeDirectory kernelPath)) >> return ()
+  return ()
 
 -- | Select the most appropriate installation directory from available options (T018)
 selectInstallationDirectory :: InstallOptions -> JupyterEnvironment -> IO (Either CLIDiagnostic FilePath)

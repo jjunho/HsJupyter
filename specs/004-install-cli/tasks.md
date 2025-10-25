@@ -81,7 +81,7 @@ Each user story must be independently testable:
 
 ### Constitutional Integration
 
-- [ ] T019 [US1] Integrate installation operations with ResourceGuard patterns in src/HsJupyter/CLI/Install.hs
+- [x] T019 [US1] Integrate installation operations with ResourceGuard patterns in src/HsJupyter/CLI/Install.hs
 - [ ] T020 [US1] Implement structured logging for installation operations via katip in src/HsJupyter/CLI/Install.hs
 - [ ] T021 [US1] Implement cancellation support using TMVar patterns in src/HsJupyter/CLI/Install.hs
 
