@@ -255,8 +255,11 @@ With multiple developers:
 
 ## Constitution Guidance
 
-Follow HsJupyter Constitution v1.1.0 Principle VI: Simplicity & Maintainability
+Follow HsJupyter Constitution v1.2.0:
 
-- Apply DRY (Don't Repeat Yourself): Eliminate code duplication through abstractions
-- Follow KISS (Keep It Simple, Stupid): Choose simplest solution that solves problem
-- Practice YAGNI (You Aren't Gonna Need It): Build only what specification requires
+### Core Principles
+
+- **Simplicity & Maintainability (VI)**: Apply DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), and YAGNI (You Aren't Gonna Need It). Eliminate code duplication through abstractions. Choose simplest solution that solves problem. Build only what specification requires.
+- **Modular Architecture & Strong Design (V)**: Apply SOLID principles, use composition over inheritance, enforce separation of concerns. Hide implementation details behind clean interfaces.
+- **Resilience & Defensive Programming (VII)**: Handle failures gracefully, apply Law of Demeter to reduce coupling, validate inputs, use structured error types (`RuntimeDiagnostic`).
+- **Pragmatic Balance (VIII)**: Apply Rule of Three (don't refactor until pattern emerges), maximize cohesion within modules while minimizing coupling between them.

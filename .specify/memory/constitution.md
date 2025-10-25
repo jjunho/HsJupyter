@@ -1,12 +1,12 @@
 <!--
 Sync Impact Report:
-- Version change: 1.0.0 → 1.1.0 (added new principle section)
-- Added principles: VI. Simplicity & Maintainability (DRY, KISS, YAGNI)
-- Modified principles: None
-- Added sections: None
+- Version change: 1.1.0 → 1.2.0 (enhanced principle definitions with resilience and pragmatic balance)
+- Added principles: VII. Resilience & Defensive Programming (defensive programming, Law of Demeter), VIII. Pragmatic Balance (Rule of Three, cohesion/coupling)
+- Modified principles: V. Modular Architecture (enhanced with SOLID principles, composition over inheritance), VI. Simplicity & Maintainability (expanded with separation of concerns)
+- Added sections: Enhanced design foundation guidance, implementation details hiding
 - Removed sections: None
-- Templates requiring updates: ⚠ plan-template.md (add DRY/KISS/YAGNI gate), ⚠ tasks-template.md (add simplicity guidance)
-- Follow-up TODOs: None - all principles implemented
+- Templates requiring updates: ✅ plan-template.md (updated constitution check gates with SOLID principles, defensive programming), ✅ tasks-template.md (updated constitution guidance with all four principles)
+- Follow-up TODOs: None - all principles implemented with comprehensive guidance
 -->
 
 # HsJupyter Constitution
@@ -29,13 +29,21 @@ Follow the speckit workflow rigidly: `/speckit.specify` → `/speckit.plan` → 
 
 Structured logging, metrics collection, and diagnostic reporting are mandatory from the earliest phases. Use `katip` for structured JSON logs with correlation IDs. Expose telemetry through the `Runtime/Telemetry.hs` module. Every runtime operation MUST support cancellation via TMVar tokens and resource monitoring via `ResourceGuard`. Error handling MUST use the structured `RuntimeDiagnostic` system with severity classification.
 
-### V. Modular Architecture
+### V. Modular Architecture & Strong Design Foundation
 
-Maintain the `HsJupyter.*` namespace with clear module separation: `Bridge/` for protocol integration, `Runtime/` for execution core, `Router/` for message dispatch, `Kernel/` for types. Use STM for thread-safe state management. Prefer total functions over partial functions. Every module MUST have comprehensive Haddock documentation. Follow four-space indentation and descriptive naming conventions.
+Maintain the `HsJupyter.*` namespace with clear module separation: `Bridge/` for protocol integration, `Runtime/` for execution core, `Router/` for message dispatch, `Kernel/` for types. Apply SOLID principles to create modular, flexible, and testable systems. Each module MUST minimize dependencies and maximize clarity. Use composition over inheritance - combine small, reusable components rather than rigid hierarchies. Enforce separation of concerns to keep each module focused on a single responsibility. Use STM for thread-safe state management. Prefer total functions over partial functions. Every module MUST have comprehensive Haddock documentation with implementation details properly hidden behind clean interfaces. Follow four-space indentation and descriptive naming conventions.
 
 ### VI. Simplicity & Maintainability
 
-Apply DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), and YAGNI (You Aren't Gonna Need It) principles rigorously. Eliminate code duplication through shared utilities and type-safe abstractions. Choose the simplest solution that meets requirements - complex patterns MUST be justified with concrete benefits. Implement only features explicitly required by current user stories; speculative features are forbidden. Refactor ruthlessly to maintain clarity. When complexity is unavoidable, isolate it behind clean interfaces with comprehensive documentation.
+Apply DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), and YAGNI (You Aren't Gonna Need It) principles rigorously. Eliminate code duplication through shared utilities and type-safe abstractions. Choose the simplest solution that meets requirements - complex patterns MUST be justified with concrete benefits. Implement only features explicitly required by current user stories; speculative features are forbidden. Maintain strict separation of concerns across all modules and layers. Refactor ruthlessly to maintain clarity. When complexity is unavoidable, isolate it behind clean interfaces with comprehensive documentation.
+
+### VII. Resilience & Defensive Programming
+
+Anticipate and handle potential failures gracefully through comprehensive error handling and resource management. Apply the Law of Demeter to reduce tight coupling between components, keeping code modular and maintainable. Every public API MUST validate inputs and handle edge cases explicitly. Use structured error types (`RuntimeDiagnostic`) rather than throwing exceptions. Implement proper resource cleanup through `ResourceGuard` and bracketing patterns. All network operations, file I/O, and external process interactions MUST include timeout handling and graceful degradation. Design systems to fail safely and provide meaningful diagnostic information.
+
+### VIII. Pragmatic Balance & Evolution
+
+Apply the Rule of Three - don't refactor until repetition proves a pattern is worth abstracting. Maximize cohesion within modules while minimizing coupling between them to keep components self-contained yet cleanly interacting. Balance optimization with simplicity - premature optimization is forbidden, but performance requirements MUST be specified and validated. Make architectural decisions based on concrete evidence rather than speculation. When refactoring, preserve existing interfaces unless breaking changes provide substantial benefits. Document trade-offs explicitly in design decisions.
 
 ## Development Workflow & Quality Gates
 
@@ -86,4 +94,4 @@ This constitution supersedes all other development practices. Amendments require
 
 For runtime development guidance, reference `AGENTS.md` for agent workflow specifics and `.specify/` scripts for tooling usage.
 
-**Version**: 1.1.0 | **Ratified**: 2025-10-25 | **Last Amended**: 2025-10-25
+**Version**: 1.2.0 | **Ratified**: 2025-10-25 | **Last Amended**: 2025-01-28

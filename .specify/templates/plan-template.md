@@ -37,8 +37,10 @@
 | Test-first mindset: define acceptance & soak tests before runtime work | [✅/❌] | [Test scenarios and performance targets status] |
 | Specification-driven development: follow speckit workflow | [✅/❌] | [Current phase and workflow compliance] |
 | Observability foundation: structured logging and diagnostics | [✅/❌] | [Telemetry and monitoring approach] |
-| Modular architecture: maintain HsJupyter.* namespace | [✅/❌] | [Module organization and STM usage] |
+| Modular architecture & strong design: apply SOLID principles, composition over inheritance | [✅/❌] | [Module organization, STM usage, separation of concerns] |
 | Simplicity & maintainability: apply DRY, KISS, YAGNI principles | [✅/❌] | [Complexity justification and simplicity approach] |
+| Resilience & defensive programming: error handling, Law of Demeter | [✅/❌] | [Error handling strategy, component coupling] |
+| Pragmatic balance: Rule of Three, cohesion/coupling balance | [✅/❌] | [Refactoring approach, optimization decisions] |
 
 ## Project Structure
 
