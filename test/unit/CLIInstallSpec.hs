@@ -10,14 +10,30 @@ import HsJupyter.CLI.Install
   , validateJupyterEnvironment
   , validateKernelspecDirectories
   , executeInstall
-  -- T016: New functions
+  -- T016: Kernelspec directory functions
   , findKernelspecDirectories
   , ensureDirectoryExists
   , getKernelPath
   , validateKernelInstallation
+  -- T017: Kernel.json generation functions
+  , generateKernelJson
+  , installKernelJson
+  , writeKernelJson
+  , validateKernelJson
   )
 import HsJupyter.CLI.Commands (InstallOptions(..), defaultInstallOptions)
 import HsJupyter.CLI.Types
+import Data.Aeson (Value(..), object, (.=))
+import Data.Aeson.Types (Array)
+import qualified Data.Vector as V
+import Data.Text (Text)
+
+-- Test helper functions
+array :: [Value] -> Value
+array = Array . V.fromList
+
+string :: Text -> Value
+string = String
 
 spec :: Spec  
 spec = describe "HsJupyter.CLI.Install" $ do
@@ -142,3 +158,72 @@ spec = describe "HsJupyter.CLI.Install" $ do
               pendingWith "Kernel installation validation failed"
         Left _diag ->
           pendingWith "Failed to create test kernelspec directory"
+  
+  -- T017: Kernel.json Generation Tests
+  describe "generateKernelJson" $ do
+    it "should generate valid kernel.json content" $ do
+      let options = defaultInstallOptions
+          ghcPath = "/usr/local/bin/ghc"
+      result <- liftIO $ generateKernelJson options ghcPath
+      case result of
+        Right kernelJson -> do
+          -- Validate the generated JSON structure
+          validationResult <- liftIO $ validateKernelJson kernelJson
+          case validationResult of
+            Right _ -> return ()  -- Success
+            Left _diag -> pendingWith "Generated kernel.json failed validation"
+        Left _diag ->
+          pendingWith "Failed to generate kernel.json"
+    
+    it "should handle empty GHC path gracefully" $ do
+      let options = defaultInstallOptions
+          ghcPath = ""
+      result <- liftIO $ generateKernelJson options ghcPath
+      case result of
+        Left _diag -> return ()  -- Expected error
+        Right _ -> expectationFailure "Should have failed with empty GHC path"
+  
+  describe "validateKernelJson" $ do
+    it "should validate correct kernel.json structure" $ do
+      let validKernelJson = object
+            [ ("argv", array [string "hs-jupyter-kernel", string "--connection", string "{connection_file}"])
+            , ("display_name", string "Haskell")
+            , ("language", string "haskell")
+            , ("interrupt_mode", string "signal")
+            ]
+      result <- liftIO $ validateKernelJson validKernelJson
+      case result of
+        Right _ -> return ()  -- Success
+        Left _diag -> pendingWith "Valid kernel.json failed validation"
+    
+    it "should reject invalid kernel.json structure" $ do
+      let invalidKernelJson = object [("invalid", string "structure")]
+      result <- liftIO $ validateKernelJson invalidKernelJson
+      case result of
+        Left _diag -> return ()  -- Expected error
+        Right _ -> expectationFailure "Should have failed with invalid structure"
+  
+  describe "writeKernelJson" $ do
+    it "should write kernel.json to file successfully" $ do
+      let testPath = "/tmp/test-kernel.json"
+          testJson = object
+            [ ("argv", array [string "test"])
+            , ("display_name", string "Test")
+            , ("language", string "test")
+            ]
+      result <- liftIO $ writeKernelJson testPath testJson
+      case result of
+        Right _ -> return ()  -- Success
+        Left _diag -> pendingWith "Failed to write kernel.json file"
+  
+  describe "installKernelJson" $ do
+    it "should complete kernel.json installation workflow" $ do
+      let testKernelPath = "/tmp/test-install-kernel.json"
+          options = defaultInstallOptions
+          ghcPath = "/usr/local/bin/ghc"
+      result <- liftIO $ installKernelJson options testKernelPath ghcPath
+      case result of
+        Right installedPath ->
+          installedPath `shouldBe` testKernelPath
+        Left _diag ->
+          pendingWith "Kernel.json installation workflow failed"

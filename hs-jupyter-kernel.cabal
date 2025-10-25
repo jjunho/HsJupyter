@@ -41,6 +41,7 @@ common project-settings
     , transformers
     , unordered-containers
     , uuid
+    , vector
 
 library
   import:             project-settings

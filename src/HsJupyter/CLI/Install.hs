@@ -12,6 +12,11 @@ module HsJupyter.CLI.Install
   , ensureDirectoryExists
   , getKernelPath
   , validateKernelInstallation
+  -- T017: Kernel.json generation with constitutional compliance
+  , generateKernelJson
+  , installKernelJson
+  , writeKernelJson
+  , validateKernelJson
   ) where
 
 import Data.Text (Text)
@@ -25,9 +30,24 @@ import System.Directory
   , writable
   , readable
   , getHomeDirectory
+  , findExecutable
   )
-import System.FilePath ((</>))
-import System.Environment (lookupEnv)
+import System.FilePath ((</>), takeDirectory)
+import System.Environment (lookupEnv, getExecutablePath)
+import Data.Aeson 
+  ( Value(..)
+  , Object
+  , Array
+  , (.=)
+  , object
+  , encode
+  )
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Aeson.Key as K
+import qualified Data.Vector as V
+import qualified Data.ByteString.Lazy as LBS
+import Data.Maybe (fromMaybe)
+
 
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
@@ -301,3 +321,122 @@ validateKernelInstallation kernelspecDir kernelName = do
           case ensureResult of
             Left diag -> return $ Left diag
             Right _createdDir -> return $ Right kernelPath
+
+-- ===========================================================================
+-- T017: Kernel.json Generation with Constitutional Compliance
+-- ===========================================================================
+
+-- | Generate kernel.json content for HsJupyter kernel installation (T017)
+generateKernelJson :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Value)
+generateKernelJson options ghcPath = do
+  -- Constitutional validation: validate inputs
+  if null ghcPath
+    then return $ Left $ ValidationError "GHC path cannot be empty"
+    else do
+      -- Get the path to the hs-jupyter-kernel executable
+      kernelExecutablePath <- getKernelExecutablePath
+      case kernelExecutablePath of
+        Left diag -> return $ Left diag
+        Right executablePath -> do
+          -- Build kernel.json structure following Jupyter specification
+          let kernelJson = object
+                [ "argv" .= generateKernelArgv executablePath
+                , "display_name" .= getDisplayName options
+                , "language" .= ("haskell" :: Text)
+                , "interrupt_mode" .= ("signal" :: Text)
+                , "env" .= generateEnvironmentVariables options ghcPath
+                , "metadata" .= generateKernelMetadata options
+                ]
+          return $ Right kernelJson
+
+-- | Generate argv array for kernel startup command (T017)
+generateKernelArgv :: FilePath -> [Text]
+generateKernelArgv executablePath =
+  [ T.pack executablePath
+  , "--connection"
+  , "{connection_file}"  -- Jupyter will substitute this placeholder
+  ]
+
+-- | Get display name for the kernel from options or default (T017)
+getDisplayName :: InstallOptions -> Text
+getDisplayName options = fromMaybe "Haskell" (ioDisplayName options)
+
+-- | Generate environment variables for kernel execution (T017)
+generateEnvironmentVariables :: InstallOptions -> FilePath -> Object
+generateEnvironmentVariables _options ghcPath = 
+  KM.fromList [(K.fromText "GHC_PATH", String $ T.pack ghcPath)]
+
+-- | Generate kernel metadata with constitutional compliance (T017)
+generateKernelMetadata :: InstallOptions -> Object
+generateKernelMetadata _options = KM.fromList
+  [ (K.fromText "kernel_version", String "0.1.0.0")
+  , (K.fromText "implementation", String "hs-jupyter-kernel")
+  , (K.fromText "implementation_version", String "0.1.0.0")
+  , (K.fromText "language_version", String "GHC 9.12.2+")
+  , (K.fromText "banner", String "HsJupyter - Haskell kernel for Jupyter notebooks")
+  , (K.fromText "help_links", Array $ V.fromList
+      [ object
+          [ ("text", String "HsJupyter Documentation")
+          , ("url", String "https://github.com/user/HsJupyter")
+          ]
+      ])
+  ]
+
+-- | Get the path to the hs-jupyter-kernel executable (T017)
+getKernelExecutablePath :: IO (Either CLIDiagnostic FilePath)
+getKernelExecutablePath = do
+  -- Try to find the executable in common locations
+  result <- try $ do
+    -- First try to use the same executable that's currently running
+    executablePath <- getExecutablePath
+    return executablePath
+  case result of
+    Left (_ :: IOException) -> do
+      -- Fallback: try to find hs-jupyter-kernel in PATH
+      pathResult <- findExecutable "hs-jupyter-kernel"
+      case pathResult of
+        Nothing -> return $ Left $ ValidationError "Unable to locate hs-jupyter-kernel executable"
+        Just execPath -> return $ Right execPath
+    Right execPath -> return $ Right execPath
+
+-- | Write kernel.json file to the specified path with constitutional error handling (T017)
+writeKernelJson :: FilePath -> Value -> IO (Either CLIDiagnostic ())
+writeKernelJson kernelPath kernelJson = do
+  result <- try $ do
+    -- Ensure the directory exists
+    let kernelDir = takeDirectory kernelPath
+    createDirectoryIfMissing True kernelDir
+    
+    -- Write kernel.json with standard JSON formatting
+    LBS.writeFile kernelPath $ encode kernelJson
+  
+  case result of
+    Left (ex :: IOException) -> 
+      return $ Left $ ValidationError $ "Failed to write kernel.json: " <> T.pack (show ex)
+    Right () -> return $ Right ()
+
+-- | Complete kernel installation by generating and writing kernel.json (T017)
+installKernelJson :: InstallOptions -> FilePath -> FilePath -> IO (Either CLIDiagnostic FilePath)
+installKernelJson options kernelPath ghcPath = do
+  -- Step 1: Generate kernel.json content
+  jsonResult <- generateKernelJson options ghcPath
+  case jsonResult of
+    Left diag -> return $ Left diag
+    Right kernelJson -> do
+      -- Step 2: Write kernel.json to file
+      writeResult <- writeKernelJson kernelPath kernelJson
+      case writeResult of
+        Left diag -> return $ Left diag
+        Right () -> return $ Right kernelPath
+
+-- | Validate generated kernel.json content against Jupyter requirements (T017)
+validateKernelJson :: Value -> IO (Either CLIDiagnostic Value)
+validateKernelJson kernelJson = do
+  case kernelJson of
+    Object obj -> do
+      -- Check required fields according to Jupyter kernel specification
+      case (KM.lookup (K.fromText "argv") obj, KM.lookup (K.fromText "display_name") obj, KM.lookup (K.fromText "language") obj) of
+        (Just (Array _), Just (String _), Just (String _)) -> 
+          return $ Right kernelJson
+        _ -> return $ Left $ ValidationError "Invalid kernel.json: missing required fields (argv, display_name, language)"
+    _ -> return $ Left $ ValidationError "Invalid kernel.json: root must be an object"
