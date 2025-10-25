@@ -1,5 +1,7 @@
 import Test.Hspec
 
+import qualified CLIInstallSpec
+import qualified CLITypesSpec
 import qualified DiagnosticsSpec
 import qualified ErrorHandlingSpec
 import qualified GHCDiagnosticsSpec
@@ -11,10 +13,11 @@ import qualified ObservabilitySpec
 import qualified ResourceGuardSpec
 import qualified SessionStateSpec
 import qualified RuntimeManagerSpec
-import qualified CLITypesSpec
 
 main :: IO ()
 main = hspec $ do
+  CLIInstallSpec.spec
+  CLITypesSpec.spec
   DiagnosticsSpec.spec
   ErrorHandlingSpec.spec
   GHCDiagnosticsSpec.spec
@@ -26,4 +29,3 @@ main = hspec $ do
   ResourceGuardSpec.spec
   SessionStateSpec.spec
   RuntimeManagerSpec.spec
-  CLITypesSpec.spec

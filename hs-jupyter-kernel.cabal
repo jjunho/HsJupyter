@@ -58,9 +58,11 @@ library
                      , HsJupyter.Runtime.SessionState
                      , HsJupyter.Runtime.Evaluation
                      , HsJupyter.Runtime.Diagnostics
+                     , HsJupyter.Runtime.ErrorHandling
                      , HsJupyter.Runtime.GHCDiagnostics
                      , HsJupyter.Runtime.ResourceGuard
                      , HsJupyter.Runtime.Telemetry
+                     , HsJupyter.CLI.Install
                      , HsJupyter.CLI.Types
                      , HsJupyter.CLI.Utilities
 
@@ -94,6 +96,7 @@ test-suite unit
   hs-source-dirs: test/unit
   main-is:        Spec.hs
   other-modules:
+    CLIInstallSpec
     CLITypesSpec
     DiagnosticsSpec
     ErrorHandlingSpec
