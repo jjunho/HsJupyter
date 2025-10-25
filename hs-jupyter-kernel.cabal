@@ -25,9 +25,13 @@ common project-settings
     , cryptonite
     , directory
     , filepath
+    , optparse-applicative  >=0.16
+    , process
+    , unix
     , zeromq4-haskell
     , ghc
     , hint
+    , katip
     , mtl
     , random
     , stm
@@ -40,25 +44,25 @@ common project-settings
 
 library
   import:             project-settings
-  exposed-modules:
-    HsJupyter.Bridge.HeartbeatThread
-    HsJupyter.Bridge.JupyterBridge
-    HsJupyter.Bridge.Protocol.Codec
-    HsJupyter.Bridge.Protocol.Envelope
-    HsJupyter.Kernel.Types
-    HsJupyter.KernelProcess
-    HsJupyter.Router.RequestRouter
-    HsJupyter.Runtime.Diagnostics
-    HsJupyter.Runtime.EchoRuntime
-    HsJupyter.Runtime.ErrorHandling
-    HsJupyter.Runtime.Evaluation
-    HsJupyter.Runtime.GHCDiagnostics
-    HsJupyter.Runtime.GHCRuntime
-    HsJupyter.Runtime.GHCSession
-    HsJupyter.Runtime.Manager
-    HsJupyter.Runtime.ResourceGuard
-    HsJupyter.Runtime.SessionState
-    HsJupyter.Runtime.Telemetry
+  exposed-modules:     HsJupyter.KernelProcess
+                     , HsJupyter.Bridge.JupyterBridge
+                     , HsJupyter.Bridge.HeartbeatThread
+                     , HsJupyter.Bridge.Protocol.Codec
+                     , HsJupyter.Bridge.Protocol.Envelope
+                     , HsJupyter.Kernel.Types
+                     , HsJupyter.Router.RequestRouter
+                     , HsJupyter.Runtime.Manager
+                     , HsJupyter.Runtime.EchoRuntime
+                     , HsJupyter.Runtime.GHCRuntime
+                     , HsJupyter.Runtime.GHCSession
+                     , HsJupyter.Runtime.SessionState
+                     , HsJupyter.Runtime.Evaluation
+                     , HsJupyter.Runtime.Diagnostics
+                     , HsJupyter.Runtime.GHCDiagnostics
+                     , HsJupyter.Runtime.ResourceGuard
+                     , HsJupyter.Runtime.Telemetry
+                     , HsJupyter.CLI.Types
+                     , HsJupyter.CLI.Utilities
 
   hs-source-dirs:     src
   other-modules:
@@ -90,6 +94,7 @@ test-suite unit
   hs-source-dirs: test/unit
   main-is:        Spec.hs
   other-modules:
+    CLITypesSpec
     DiagnosticsSpec
     ErrorHandlingSpec
     GHCDiagnosticsSpec

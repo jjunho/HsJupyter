@@ -1,30 +1,35 @@
 module Main (main) where
 
-import Control.Applicative ((<|>))
+
 import Data.Char (toLower)
-import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Options.Applicative
-import System.Environment (lookupEnv)
+import System.Environment (getArgs, lookupEnv)
 import System.Exit (die)
 
 import HsJupyter.KernelProcess
-  ( KernelProcessConfig(..)
-  , LoadConfigError(..)
+  ( LoadConfigError(..)
   , LogLevel(..)
   , loadKernelProcessConfig
   , runKernel
   , summariseConfig
   )
 
--- | CLI arguments supported by the prototype
-data Options = Options
+-- | Application modes: either run kernel server or CLI commands
+data AppMode
+  = KernelServer KernelOptions    -- Traditional kernel server mode
+  | CLICommand [String]           -- CLI subcommand mode (placeholder for now)
+  deriving (Show)
+
+-- | Kernel server options (existing functionality)
+data KernelOptions = KernelOptions
   { optConnection :: FilePath
   , optLogLevel   :: Maybe LogLevel
-  }
+  } deriving (Show)
 
-optionsParser :: Parser Options
-optionsParser = Options
+-- | Parse kernel server options
+kernelOptionsParser :: Parser KernelOptions
+kernelOptionsParser = KernelOptions
   <$> strOption
         ( long "connection"
        <> metavar "FILE"
@@ -36,24 +41,51 @@ optionsParser = Options
        <> help "Log level (Debug|Info|Warn|Error)"
         ))
 
+-- | Determine application mode based on command line arguments
+determineMode :: [String] -> AppMode
+determineMode args = case args of
+  [] -> KernelServer defaultKernelOptions  -- Default to server mode
+  ("install":_) -> CLICommand args
+  ("doctor":_) -> CLICommand args
+  ("uninstall":_) -> CLICommand args
+  ("list":_) -> CLICommand args
+  ("version":_) -> CLICommand args
+  _ -> KernelServer defaultKernelOptions  -- Default to server mode for unknown args
+  where
+    defaultKernelOptions = KernelOptions
+      { optConnection = ""  -- Will be handled by parser
+      , optLogLevel = Nothing
+      }
+
 main :: IO ()
 main = do
-  opts <- execParser optsInfo
-  envLevelStr <- lookupEnv "HSJUPYTER_LOG_LEVEL"
-  let envLevel = envLevelStr >>= parseLogLevel
-      effectiveLevel = optLogLevel opts <|> envLevel
-  eConfig <- loadKernelProcessConfig (optConnection opts) effectiveLevel
-  case eConfig of
-    Left err -> die (renderError err)
-    Right cfg -> do
-      putStrLn $ "[hsjupyter] binding kernel: " <> T.unpack (summariseConfig cfg)
-      putStrLn "[hsjupyter] kernel ready – waiting for Jupyter messages (Ctrl+C to exit)"
-      runKernel cfg
+  args <- getArgs
+  case determineMode args of
+    CLICommand cliArgs -> do
+      -- Placeholder for CLI command handling
+      -- TODO: Implement CLI command dispatch (will be done in later tasks)
+      putStrLn $ "CLI command mode (not yet implemented): " ++ show cliArgs
+      putStrLn "Available commands: install, doctor, uninstall, list, version"
+      die "CLI commands will be implemented in subsequent tasks"
+    
+    KernelServer _ -> do
+      -- Use existing kernel server logic
+      opts <- execParser optsInfo
+      envLevelStr <- lookupEnv "HSJUPYTER_LOG_LEVEL"
+      let envLevel = envLevelStr >>= parseLogLevel
+          effectiveLevel = optLogLevel opts <|> envLevel
+      eConfig <- loadKernelProcessConfig (optConnection opts) effectiveLevel
+      case eConfig of
+        Left err -> die (renderError err)
+        Right cfg -> do
+          putStrLn $ "[hsjupyter] binding kernel: " <> T.unpack (summariseConfig cfg)
+          putStrLn "[hsjupyter] kernel ready – waiting for Jupyter messages (Ctrl+C to exit)"
+          runKernel cfg
   where
-    optsInfo = info (optionsParser <**> helper)
+    optsInfo = info (kernelOptionsParser <**> helper)
       ( fullDesc
-     <> progDesc "Phase 1 protocol bridge prototype for HsJupyter"
-     <> header "hs-jupyter-kernel"
+     <> progDesc "HsJupyter kernel server and CLI management tools"
+     <> header "hs-jupyter-kernel - Haskell kernel for Jupyter with CLI tools"
       )
 
     renderError :: LoadConfigError -> String
