@@ -1,3 +1,4 @@
+# Haskell build artifacts
 /dist/
 /.stack-work/
 /.cabal-sandbox/
@@ -5,16 +6,45 @@
 /.ghc.environment.*
 .ghci
 .ghci-tmp/
-/.vs/
-/.idea/
-/.vscode/
 *.hi
 *.o
 *.eventlog
+*.prof
+dist-newstyle/
+
+# IDE files
+/.vs/
+/.idea/
+/.vscode/
+*.iml
+
+# Temporary files
 .tmp/
+*.tmp
 *.swp
+*.bak
+
+# Python artifacts (for demo scripts)
 /node_modules/
 /tmp/
 /scripts/demo/__pycache__/
+*.pyc
+__pycache__/
 
-dist-newstyle/
+# Logs and runtime files
+*.log
+*.pid
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env*
+*.key
+*.crt
+secrets/
+
+# Test artifacts
+coverage/
+.coverage

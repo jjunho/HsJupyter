@@ -1,6 +1,7 @@
 import Test.Hspec
 
 import qualified DiagnosticsSpec
+import qualified ErrorHandlingSpec
 import qualified GHCDiagnosticsSpec
 import qualified GHCRuntimeSpec
 import qualified GHCSessionSpec
@@ -14,6 +15,7 @@ import qualified RuntimeManagerSpec
 main :: IO ()
 main = hspec $ do
   DiagnosticsSpec.spec
+  ErrorHandlingSpec.spec
   GHCDiagnosticsSpec.spec
   GHCRuntimeSpec.spec
   GHCSessionSpec.spec

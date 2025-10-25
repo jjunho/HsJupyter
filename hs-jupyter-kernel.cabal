@@ -50,6 +50,7 @@ library
     HsJupyter.Router.RequestRouter
     HsJupyter.Runtime.Diagnostics
     HsJupyter.Runtime.EchoRuntime
+    HsJupyter.Runtime.ErrorHandling
     HsJupyter.Runtime.Evaluation
     HsJupyter.Runtime.GHCDiagnostics
     HsJupyter.Runtime.GHCRuntime
@@ -90,6 +91,7 @@ test-suite unit
   main-is:        Spec.hs
   other-modules:
     DiagnosticsSpec
+    ErrorHandlingSpec
     GHCDiagnosticsSpec
     GHCRuntimeSpec
     GHCSessionSpec
