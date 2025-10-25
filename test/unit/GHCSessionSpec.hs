@@ -92,3 +92,102 @@ spec = describe "GHCSession" $ do
     it "ignores comparisons and arrows" $ do
       extractBindingNames "x == y" `shouldBe` []
       extractBindingNames "case x of\n  Just y => y" `shouldBe` []
+
+  describe "import policy enforcement" $ do
+    it "allows modules in the default safe modules list" $ do
+      session <- atomically $ newGHCSession defaultGHCConfig
+      result <- atomically $ checkImportPolicy session "Data.List"
+      result `shouldBe` Right ()
+
+    it "allows modules explicitly in allowedModules" $ do
+      let customPolicy = ImportPolicy
+            { allowedModules = Set.fromList ["Data.Custom"]
+            , deniedModules = Set.empty
+            , defaultPolicy = Deny
+            , systemModulesAllowed = False
+            }
+      let customConfig = defaultGHCConfig { importPolicy = customPolicy }
+      session <- atomically $ newGHCSession customConfig
+      result <- atomically $ checkImportPolicy session "Data.Custom"
+      result `shouldBe` Right ()
+
+    it "denies modules explicitly in deniedModules" $ do
+      let customPolicy = ImportPolicy
+            { allowedModules = Set.empty
+            , deniedModules = Set.fromList ["System.Process"]
+            , defaultPolicy = Allow
+            , systemModulesAllowed = True
+            }
+      let customConfig = defaultGHCConfig { importPolicy = customPolicy }
+      session <- atomically $ newGHCSession customConfig
+      result <- atomically $ checkImportPolicy session "System.Process"
+      case result of
+        Left err -> err `shouldContain` "denied by security policy"
+        Right () -> expectationFailure "Expected denial but got approval"
+
+    it "applies default policy to unlisted modules" $ do
+      let denyByDefaultPolicy = ImportPolicy
+            { allowedModules = Set.empty
+            , deniedModules = Set.empty  
+            , defaultPolicy = Deny
+            , systemModulesAllowed = False
+            }
+      let denyConfig = defaultGHCConfig { importPolicy = denyByDefaultPolicy }
+      session <- atomically $ newGHCSession denyConfig
+      result <- atomically $ checkImportPolicy session "Data.UnknownModule"
+      case result of
+        Left err -> err `shouldContain` "denied by security policy"
+        Right () -> expectationFailure "Expected denial but got approval"
+
+    it "handles system modules according to systemModulesAllowed flag" $ do
+      -- Test with system modules allowed
+      let allowSystemPolicy = ImportPolicy
+            { allowedModules = Set.empty
+            , deniedModules = Set.empty
+            , defaultPolicy = Allow
+            , systemModulesAllowed = True
+            }
+      let allowConfig = defaultGHCConfig { importPolicy = allowSystemPolicy }
+      allowSession <- atomically $ newGHCSession allowConfig
+      allowResult <- atomically $ checkImportPolicy allowSession "System.IO"
+      allowResult `shouldBe` Right ()
+
+      -- Test with system modules denied
+      let denySystemPolicy = ImportPolicy
+            { allowedModules = Set.empty
+            , deniedModules = Set.empty
+            , defaultPolicy = Allow
+            , systemModulesAllowed = False
+            }
+      let denyConfig = defaultGHCConfig { importPolicy = denySystemPolicy }
+      denySession <- atomically $ newGHCSession denyConfig
+      denyResult <- atomically $ checkImportPolicy denySession "System.IO"
+      case denyResult of
+        Left err -> err `shouldContain` "denied by security policy"
+        Right () -> expectationFailure "Expected denial but got approval"
+
+    it "prioritizes explicit allow over system modules policy" $ do
+      let policy = ImportPolicy
+            { allowedModules = Set.fromList ["System.IO"]
+            , deniedModules = Set.empty
+            , defaultPolicy = Deny
+            , systemModulesAllowed = False
+            }
+      let config = defaultGHCConfig { importPolicy = policy }
+      session <- atomically $ newGHCSession config
+      result <- atomically $ checkImportPolicy session "System.IO"
+      result `shouldBe` Right ()
+
+    it "prioritizes explicit deny over allow list" $ do
+      let policy = ImportPolicy
+            { allowedModules = Set.fromList ["Data.List"]
+            , deniedModules = Set.fromList ["Data.List"]
+            , defaultPolicy = Allow
+            , systemModulesAllowed = True
+            }
+      let config = defaultGHCConfig { importPolicy = policy }
+      session <- atomically $ newGHCSession config
+      result <- atomically $ checkImportPolicy session "Data.List"
+      case result of
+        Left err -> err `shouldContain` "denied by security policy"
+        Right () -> expectationFailure "Expected denial but got approval"

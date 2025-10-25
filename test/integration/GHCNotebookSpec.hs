@@ -65,6 +65,15 @@ submitGHCExecute manager ctx metadata code = do
   -- Use the internal GHC submit function directly
   rmSubmitGHC manager ctx metadata code
 
+-- Helper for import operations (for now, treat as special execute operations)
+submitGHCImport :: RuntimeManager -> ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome
+submitGHCImport manager ctx metadata moduleImport = do
+  -- For now, construct an import statement and execute it
+  let importStatement = if "import" `T.isPrefixOf` moduleImport
+                       then moduleImport
+                       else "import " <> moduleImport
+  rmSubmitGHC manager ctx metadata importStatement
+
 spec :: Spec
 spec = describe "GHC Notebook Integration" $ do
   describe "User Story 1: Basic Expression Evaluation" $ do
@@ -189,3 +198,73 @@ spec = describe "GHC Notebook Integration" $ do
         case outcomeValue outcome1 of
           Just result -> result `shouldBe` "[2,4,6,8]"
           Nothing -> expectationFailure "Expected list result"
+
+  describe "Module import workflow" $ do
+    it "imports safe modules and uses their functions" $ do
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Import Data.List
+        let ctx1 = testExecuteContext "ghc-import-001"
+        outcome1 <- submitGHCImport manager ctx1 testJobMetadata "Data.List"
+        
+        outcomeStatus outcome1 `shouldBe` ExecutionOk
+        
+        -- Use sort function from Data.List
+        let ctx2 = testExecuteContext "ghc-import-002" 
+        outcome2 <- submitGHCExecute manager ctx2 testJobMetadata "sort [3, 1, 4, 1, 5]"
+        
+        outcomeStatus outcome2 `shouldBe` ExecutionOk
+        case outcomeValue outcome2 of
+          Just result -> result `shouldBe` "[1,1,3,4,5]"
+          Nothing -> expectationFailure "Expected sorted list result"
+
+    it "imports qualified modules with alias" $ do 
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Import qualified Data.List as L
+        let ctx1 = testExecuteContext "ghc-qualified-001"
+        outcome1 <- submitGHCImport manager ctx1 testJobMetadata "qualified Data.List as L"
+        
+        outcomeStatus outcome1 `shouldBe` ExecutionOk
+        
+        -- Use qualified function
+        let ctx2 = testExecuteContext "ghc-qualified-002"
+        outcome2 <- submitGHCExecute manager ctx2 testJobMetadata "L.reverse [1, 2, 3]"
+        
+        outcomeStatus outcome2 `shouldBe` ExecutionOk
+        case outcomeValue outcome2 of
+          Just result -> result `shouldBe` "[3,2,1]"
+          Nothing -> expectationFailure "Expected reversed list result"
+
+    it "handles import errors gracefully" $ do
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Try to import non-existent module
+        let ctx1 = testExecuteContext "ghc-import-error-001"
+        outcome1 <- submitGHCImport manager ctx1 testJobMetadata "Data.NonExistentModule"
+        
+        -- Should get an error but not crash
+        outcomeStatus outcome1 `shouldBe` ExecutionError
+
+    it "enforces import security policy" $ do
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Try to import System module (should be denied by default policy)
+        let ctx1 = testExecuteContext "ghc-security-001"
+        outcome1 <- submitGHCImport manager ctx1 testJobMetadata "System.Process"
+        
+        -- Should be denied by security policy
+        outcomeStatus outcome1 `shouldBe` ExecutionError
+
+    it "allows selective imports" $ do
+      withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
+        -- Import only specific functions from Data.List
+        let ctx1 = testExecuteContext "ghc-selective-001"
+        outcome1 <- submitGHCImport manager ctx1 testJobMetadata "Data.List (sort, reverse)"
+        
+        outcomeStatus outcome1 `shouldBe` ExecutionOk
+        
+        -- Use imported function
+        let ctx2 = testExecuteContext "ghc-selective-002"
+        outcome2 <- submitGHCExecute manager ctx2 testJobMetadata "reverse [1, 2, 3]"
+        
+        outcomeStatus outcome2 `shouldBe` ExecutionOk
+        case outcomeValue outcome2 of
+          Just result -> result `shouldBe` "[3,2,1]"
+          Nothing -> expectationFailure "Expected reversed list result"

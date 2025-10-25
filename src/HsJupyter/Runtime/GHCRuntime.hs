@@ -20,12 +20,13 @@ module HsJupyter.Runtime.GHCRuntime
 
 import Control.Concurrent.STM
 import Control.Monad.IO.Class
+import Data.List (isInfixOf, isPrefixOf, tails)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Timeout (timeout)
 import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter, interpret, as, setImports, runStmt)
 
-import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding)
+import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), ghcErrorToDiagnostic, interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
@@ -87,10 +88,37 @@ evaluateDeclaration session code = do
       return $ Right bindingNames
 
 -- | Import a Haskell module with security policy checking
+-- Supports: import ModuleName, import qualified ModuleName, import qualified ModuleName as Alias
 importModule :: GHCSessionState -> String -> IO (Either GHCError ())
-importModule _session _moduleName = do
-  -- Placeholder implementation for Phase 5
-  return $ Right ()
+importModule session importStatement = do
+  -- Validate import statement first
+  case validateImportStatement importStatement of
+    Left err -> return $ Left (ImportError "invalid" (T.pack err))
+    Right () -> do
+      -- Parse import statement to extract module name
+      let (moduleName, isQualified) = parseImportStatement importStatement
+      
+      -- Check if module is allowed by policy
+      policyCheck <- atomically $ checkImportPolicy session moduleName
+      case policyCheck of
+        Left err -> return $ Left (ImportError moduleName (T.pack err))
+        Right () -> do
+          -- Execute import with timeout protection
+          let timeoutSeconds = compilationTimeout (sessionConfig session)
+          result <- timeout (timeoutSeconds * 1000000) $ runInterpreter $ do
+            -- Get current imports and add the new module
+            currentImports <- liftIO $ atomically $ listImportedModules session
+            let allImports = "Prelude" : currentImports ++ [importStatement]
+            setImports allImports
+            return ()
+          
+          case result of
+            Nothing -> return $ Left (TimeoutError timeoutSeconds)
+            Just (Left err) -> return $ Left (interpretError err)
+            Just (Right ()) -> do
+              -- Add to imported modules list (store the full import statement)
+              atomically $ addImportedModule session importStatement
+              return $ Right ()
 
 -- | Initialize a new GHC session with configuration
 initializeGHCSession :: GHCConfig -> STM (Either GHCError GHCSessionState)
@@ -106,6 +134,99 @@ resetGHCSession session = cleanupSession session
 getSessionBindings :: GHCSessionState -> STM [String]
 getSessionBindings = listBindings
 
+-- | Import statement components
+data ImportStatement = ImportStatement
+  { importModuleName :: String
+  , importQualified :: Bool
+  , importAlias :: Maybe String
+  , importList :: Maybe [String]  -- Nothing = import all, Just [] = import nothing, Just [items] = selective
+  } deriving (Show, Eq)
+
+-- | Parse import statement to extract module name and qualification info
+parseImportStatement :: String -> (String, Bool)
+parseImportStatement stmt = 
+  let parsed = parseImportStatementFull stmt
+  in (importModuleName parsed, importQualified parsed)
+
+-- | Parse import statement into full structure
+parseImportStatementFull :: String -> ImportStatement
+parseImportStatementFull stmt = 
+  let cleanStmt = dropWhile (== ' ') stmt
+      tokens = words cleanStmt
+  in case tokens of
+    -- import qualified ModuleName
+    ["import", "qualified", moduleName] -> 
+      ImportStatement moduleName True Nothing Nothing
+    -- import qualified ModuleName as Alias
+    ["import", "qualified", moduleName, "as", alias] -> 
+      ImportStatement moduleName True (Just alias) Nothing
+    -- import ModuleName
+    ["import", moduleName] -> 
+      ImportStatement moduleName False Nothing Nothing
+    -- import ModuleName as Alias
+    ["import", moduleName, "as", alias] -> 
+      ImportStatement moduleName False (Just alias) Nothing
+    -- import ModuleName (selective imports)
+    ("import":moduleName:rest) -> 
+      let (selective, alias) = parseSelectiveAndAlias (unwords rest)
+      in ImportStatement moduleName False alias selective
+    -- import qualified ModuleName (selective imports)
+    ("import":"qualified":moduleName:rest) -> 
+      let (selective, alias) = parseSelectiveAndAlias (unwords rest)
+      in ImportStatement moduleName True alias selective
+    -- Just the module name (assume simple import)
+    [moduleName] -> 
+      ImportStatement moduleName False Nothing Nothing
+    -- Default case - treat as module name
+    _ -> 
+      ImportStatement stmt False Nothing Nothing
+
+-- | Parse selective imports and alias from the rest of import statement
+parseSelectiveAndAlias :: String -> (Maybe [String], Maybe String)
+parseSelectiveAndAlias rest
+  | null rest = (Nothing, Nothing)
+  | "(" `isPrefixOf` rest && ")" `isInfixOf` rest = 
+      let (selective, remainder) = parseSelectiveImports rest
+          alias = parseAliasFromRemainder remainder
+      in (selective, alias)
+  | " as " `isInfixOf` rest = 
+      (Nothing, parseAliasFromRemainder rest)
+  | otherwise = (Nothing, Nothing)
+  where
+    parseSelectiveImports :: String -> (Maybe [String], String)
+    parseSelectiveImports str = 
+      case break (== ')') str of
+        (beforeParen, afterParen) ->
+          let itemsStr = drop 1 beforeParen  -- Remove opening '('
+              items = map (filter (/= ' ')) $ splitOn ',' itemsStr
+              remainder = drop 1 afterParen  -- Remove closing ')'
+          in (Just items, remainder)
+    
+    parseAliasFromRemainder :: String -> Maybe String
+    parseAliasFromRemainder str
+      | " as " `isInfixOf` str = 
+          case words str of
+            (_:"as":alias:_) -> Just alias
+            _ -> Nothing
+      | otherwise = Nothing
+    
+    splitOn :: Char -> String -> [String]
+    splitOn _ "" = []
+    splitOn delim str = 
+      case break (== delim) str of
+        (before, "") -> [before]
+        (before, _:after) -> before : splitOn delim after
+    
+
+
+-- | Validate import statement syntax and security
+validateImportStatement :: String -> Either String ()
+validateImportStatement stmt
+  | null stmt = Left "Empty import statement"
+  | length stmt > 200 = Left "Import statement too long"
+  | any (`elem` stmt) [';', '&', '|', '`'] = Left "Invalid characters in import statement"
+  | otherwise = Right ()
+
 -- | Default GHC configuration with safe defaults
 defaultGHCConfig :: GHCConfig
 defaultGHCConfig = GHCConfig
@@ -116,12 +237,12 @@ defaultGHCConfig = GHCConfig
   , resourceLimits = defaultResourceBudget
   }
   where
-    -- Safe default import policy - allow basic imports
+    -- Safe default import policy - allow safe modules, deny system modules by default
     defaultSafePolicy = ImportPolicy
-      { allowedModules = mempty
+      { allowedModules = defaultSafeModules
       , deniedModules = mempty  
-      , defaultPolicy = Allow
-      , systemModulesAllowed = True
+      , defaultPolicy = Deny
+      , systemModulesAllowed = False
       }
     
     -- Default resource budget - generous for development
