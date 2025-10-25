@@ -31,7 +31,7 @@ common project-settings
     , zeromq4-haskell
     , ghc
     , hint
-    , katip
+
     , mtl
     , random
     , stm

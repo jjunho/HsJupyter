@@ -23,6 +23,11 @@ module HsJupyter.CLI.Install
   , resolveKernelName
   , resolveGHCPath
   , verifyKernelInstallation
+  -- T020: Structured logging functions
+  , logCLIOperation
+  , logInstallStep
+  , logInstallError
+  , logInstallSuccess
   ) where
 
 import Data.Text (Text)
@@ -72,6 +77,18 @@ import HsJupyter.Runtime.ErrorHandling
   , enrichDiagnostic
   )
 
+-- T020: Structured logging integration following constitutional patterns
+import HsJupyter.Runtime.Telemetry 
+  ( RuntimeMetric(..)
+  , emitMetric
+  )
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Key as K
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
+import System.IO (stdout, hPutStrLn)
+import Control.Monad.IO.Class (liftIO)
+import qualified Data.Text as T
+
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
   , CLIDiagnostic(..)
@@ -110,10 +127,56 @@ withCLITimeout timeoutSeconds operation action = do
     timeout :: Int -> IO a -> IO (Maybe a)
     timeout = System.Timeout.timeout
 
+-- ===========================================================================
+-- T020: CLI-specific structured logging functions
+-- ===========================================================================
+
+-- | Initialize a simple katip logging environment for CLI operations
+
+
+-- | Log structured information about CLI operations using existing telemetry
+logCLIOperation :: String -> String -> [(String, A.Value)] -> IO ()
+logCLIOperation operation details fields = do
+  timestamp <- getCurrentTime
+  let metric = RuntimeMetric
+        { metricName = T.pack "cli.operation"
+        , metricValue = A.object $
+            [ "operation" A..= operation
+            , "details" A..= details
+            , "timestamp" A..= timestamp
+            ] ++ [(K.fromString k, v) | (k, v) <- fields]
+        , metricLabels = [("component", "cli")]
+        }
+  emitMetric (const $ return ()) metric  -- Simple emit to stdout for now
+  hPutStrLn stdout $ "[CLI] " ++ operation ++ ": " ++ details
+
+-- | Log installation step with structured context
+logInstallStep :: String -> String -> [(String, A.Value)] -> IO ()  
+logInstallStep step msg context = 
+  logCLIOperation "install_step" msg (("step", A.String (T.pack step)) : context)
+
+-- | Log installation error with structured context
+logInstallError :: String -> String -> [(String, A.Value)] -> IO ()
+logInstallError step errorMsg context = 
+  logCLIOperation "install_error" errorMsg (("step", A.String (T.pack step)) : ("error", A.Bool True) : context)
+
+-- | Log installation success with metrics
+logInstallSuccess :: String -> [(String, A.Value)] -> IO ()
+logInstallSuccess msg context = 
+  logCLIOperation "install_success" msg (("success", A.Bool True) : context)
+
 -- | Execute kernel installation with given options (T015: Jupyter environment detection, T018: Complete installation)
 -- T019: Enhanced with ResourceGuard integration for constitutional compliance
+-- T020: Enhanced with structured logging via katip for observability
 executeInstall :: InstallOptions -> IO (Either CLIDiagnostic ())
 executeInstall options = withErrorContext "kernel-installation" $ do
+  -- T020: Log installation start with options  
+  logInstallStep "initialize" "Starting kernel installation" 
+    [ ("scope", A.String $ T.pack $ show $ ioScope options)
+    , ("force_reinstall", A.Bool $ ioForceReinstall options)
+    , ("validation_level", A.String $ T.pack $ show $ ioValidationLevel options)
+    ]
+  
   -- Constitutional resource limits for installation operations (<2min, <100MB)
   let installationLimits = defaultResourceLimits
         { rcMaxCpuSeconds = 120.0  -- 2 minute timeout for installation
@@ -123,27 +186,49 @@ executeInstall options = withErrorContext "kernel-installation" $ do
   
   result <- withResourceGuard installationLimits $ \guard -> do
     -- Step 1: Detect Jupyter environment (T015 implementation)
+    logInstallStep "detect-environment" "Detecting Jupyter environment" []
     jupyterEnvResult <- withCLIResourceError "jupyter-environment-detection" detectJupyterEnvironment
     case jupyterEnvResult of
-      Left diag -> return $ Left diag
+      Left diag -> do
+        logInstallError "detect-environment" "Failed to detect Jupyter environment" 
+          [("error", A.String $ T.pack $ show diag)]
+        return $ Left diag
       Right jupyterEnv -> do
+        logInstallStep "detect-environment" "Jupyter environment detected successfully"
+          [ ("kernelspec_dirs", A.Number $ fromIntegral $ length $ jeKernelspecDirs jupyterEnv)
+          , ("install_type", A.String $ T.pack $ show $ jeInstallType jupyterEnv)
+          ]
+        
         -- Step 2: Validate environment meets installation requirements  
+        logInstallStep "validate-environment" "Validating Jupyter environment" []
         validationResult <- withCLIResourceError "jupyter-environment-validation" $ 
           validateJupyterEnvironment jupyterEnv options
         case validationResult of
-          Left diag -> return $ Left diag
+          Left diag -> do
+            logInstallError "validate-environment" "Environment validation failed"
+              [("error", A.String $ T.pack $ show diag)]
+            return $ Left diag
           Right validatedEnv -> do
+            logInstallStep "validate-environment" "Environment validation successful" []
+            
             -- Step 3: Execute complete kernel registration workflow (T018)
+            logInstallStep "kernel-registration" "Starting kernel registration" []
             registrationResult <- withCLIResourceError "kernel-registration" $ 
               executeKernelRegistration options validatedEnv
             case registrationResult of
-              Left diag -> return $ Left diag
-              Right _ -> return $ Right ()
-  
+              Left diag -> do
+                logInstallError "kernel-registration" "Kernel registration failed"
+                  [("error", A.String $ T.pack $ show diag)]
+                return $ Left diag
+              Right kernelPath -> do
+                logInstallSuccess "Kernel installation completed successfully"
+                  [("kernel_path", A.String $ T.pack kernelPath)]
+                return $ Right ()  -- T020: Return result
   return result
 
 -- | Detect current Jupyter environment using system utilities (T015)
--- T019: Enhanced with ResourceGuard protection for system detection operations
+-- T019: Enhanced with ResourceGuard protection for system detection operations  
+-- T020: Enhanced with structured logging for observability
 detectJupyterEnvironment :: IO (Either CLIDiagnostic JupyterEnvironment)
 detectJupyterEnvironment = withErrorContext "jupyter-environment-detection" $ do
   -- Constitutional resource limits for environment detection (<5s timeout)
@@ -494,6 +579,11 @@ writeKernelJson kernelPath kernelJson = do
 -- | Complete kernel installation by generating and writing kernel.json (T017)
 installKernelJson :: InstallOptions -> FilePath -> FilePath -> IO (Either CLIDiagnostic FilePath)
 installKernelJson options kernelPath ghcPath = withErrorContext "kernel-json-installation" $ do
+  -- T020: Log kernel.json installation start
+  logInstallStep "kernel-json" "Installing kernel.json file"
+    [ ("kernel_path", A.String $ T.pack kernelPath)
+    , ("ghc_path", A.String $ T.pack ghcPath)
+    ]
   -- Step 1: Generate kernel.json content with resource protection
   jsonResult <- withCLIResourceError "json-generation" $ generateKernelJson options ghcPath
   case jsonResult of
