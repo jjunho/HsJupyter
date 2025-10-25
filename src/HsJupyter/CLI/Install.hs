@@ -17,20 +17,28 @@ module HsJupyter.CLI.Install
   , installKernelJson
   , writeKernelJson
   , validateKernelJson
+  -- T018: Kernel registration and file system operations
+  , executeKernelRegistration
+  , selectInstallationDirectory
+  , resolveKernelName
+  , resolveGHCPath
+  , verifyKernelInstallation
   ) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad (filterM)
+import Control.Monad (filterM, when)
 import Control.Exception (try, IOException)
 import System.Directory 
   ( createDirectoryIfMissing
   , doesDirectoryExist
+  , doesFileExist
   , getPermissions
   , writable
   , readable
   , getHomeDirectory
   , findExecutable
+  , removeDirectoryRecursive
   )
 import System.FilePath ((</>), takeDirectory)
 import System.Environment (lookupEnv, getExecutablePath)
@@ -41,6 +49,7 @@ import Data.Aeson
   , (.=)
   , object
   , encode
+  , eitherDecode
   )
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as K
@@ -58,7 +67,7 @@ import HsJupyter.CLI.Types
 import HsJupyter.CLI.Commands (InstallOptions(..))
 import qualified HsJupyter.CLI.Utilities as Utilities
 
--- | Execute kernel installation with given options (T015: Jupyter environment detection)
+-- | Execute kernel installation with given options (T015: Jupyter environment detection, T018: Complete installation)
 executeInstall :: InstallOptions -> IO (Either CLIDiagnostic ())
 executeInstall options = do
   -- Step 1: Detect Jupyter environment (T015 implementation)
@@ -70,10 +79,12 @@ executeInstall options = do
       validationResult <- validateJupyterEnvironment jupyterEnv options
       case validationResult of
         Left diag -> return $ Left diag
-        Right _validatedEnv -> do
-          -- TODO: Continue with actual installation steps (T016-T018)
-          -- For now, return success to indicate environment detection works
-          return $ Right ()
+        Right validatedEnv -> do
+          -- Step 3: Execute complete kernel registration workflow (T018)
+          registrationResult <- executeKernelRegistration options validatedEnv
+          case registrationResult of
+            Left diag -> return $ Left diag
+            Right _ -> return $ Right ()
 
 -- | Detect current Jupyter environment using system utilities (T015)
 detectJupyterEnvironment :: IO (Either CLIDiagnostic JupyterEnvironment)
@@ -440,3 +451,162 @@ validateKernelJson kernelJson = do
           return $ Right kernelJson
         _ -> return $ Left $ ValidationError "Invalid kernel.json: missing required fields (argv, display_name, language)"
     _ -> return $ Left $ ValidationError "Invalid kernel.json: root must be an object"
+
+-- ===========================================================================
+-- T018: Kernel Registration and File System Operations
+-- ===========================================================================
+
+-- | Execute complete kernel registration workflow (T018)
+executeKernelRegistration :: InstallOptions -> JupyterEnvironment -> IO (Either CLIDiagnostic FilePath)
+executeKernelRegistration options jupyterEnv = do
+  -- Step 1: Find suitable kernelspec directory for installation
+  targetDirectoryResult <- selectInstallationDirectory options jupyterEnv
+  case targetDirectoryResult of
+    Left diag -> return $ Left diag
+    Right targetDir -> do
+      -- Step 2: Determine kernel name and check for conflicts
+      kernelNameResult <- resolveKernelName options targetDir
+      case kernelNameResult of
+        Left diag -> return $ Left diag
+        Right kernelName -> do
+          -- Step 3: Get GHC path for kernel configuration
+          ghcPathResult <- resolveGHCPath options
+          case ghcPathResult of
+            Left diag -> return $ Left diag
+            Right ghcPath -> do
+              -- Step 4: Create kernel directory and install kernel.json
+              let kernelPath = getKernelPath targetDir kernelName
+              installResult <- installKernelJson options kernelPath ghcPath
+              case installResult of
+                Left diag -> return $ Left diag
+                Right installedPath -> do
+                  -- Step 5: Verify installation success
+                  verificationResult <- verifyKernelInstallation installedPath
+                  case verificationResult of
+                    Left diag -> return $ Left diag
+                    Right _ -> return $ Right installedPath
+
+-- | Select the most appropriate installation directory from available options (T018)
+selectInstallationDirectory :: InstallOptions -> JupyterEnvironment -> IO (Either CLIDiagnostic FilePath)
+selectInstallationDirectory options jupyterEnv = do
+  let availableDirs = jeKernelspecDirs jupyterEnv
+  
+  case ioScope options of
+    AutoDetect -> do
+      -- Choose the first writable directory, preferring user directories
+      suitableDir <- findBestInstallationDirectory availableDirs
+      case suitableDir of
+        Nothing -> return $ Left $ ValidationError "No suitable installation directory found"
+        Just dir -> return $ Right dir
+        
+    UserInstallation -> do
+      -- Filter to user directories only
+      userDirs <- filterUserDirectories availableDirs
+      case userDirs of
+        [] -> return $ Left $ ValidationError "No user-accessible kernelspec directories found"
+        (dir:_) -> return $ Right dir
+        
+    SystemInstallation -> do
+      -- Filter to system directories only
+      systemDirs <- filterSystemDirectories availableDirs
+      case systemDirs of
+        [] -> return $ Left $ ValidationError "No system kernelspec directories found or insufficient permissions"
+        (dir:_) -> return $ Right dir
+        
+    CustomPath customDir -> do
+      -- Validate custom directory exists and is writable
+      customValidation <- filterAccessibleDirectories [customDir]
+      case customValidation of
+        [] -> return $ Left $ ValidationError $ "Custom directory not accessible: " <> T.pack customDir
+        (_:_) -> return $ Right customDir
+
+-- | Find the best installation directory from available options (T018)
+findBestInstallationDirectory :: [FilePath] -> IO (Maybe FilePath)
+findBestInstallationDirectory [] = return Nothing
+findBestInstallationDirectory dirs = do
+  -- Prefer user directories over system directories
+  userDirs <- filterUserDirectories dirs
+  if not (null userDirs)
+    then return $ Just (head userDirs)
+    else do
+      -- Fall back to system directories if no user directories available
+      systemDirs <- filterSystemDirectories dirs
+      return $ if null systemDirs then Nothing else Just (head systemDirs)
+
+-- | Resolve kernel name, handling conflicts with existing installations (T018)
+resolveKernelName :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Text)
+resolveKernelName options targetDir = do
+  let baseKernelName = fromMaybe "haskell" (ioDisplayName options)
+      proposedName = T.toLower $ T.replace " " "-" baseKernelName
+  
+  if ioForceReinstall options
+    then do
+      -- Force reinstall: remove existing installation if present
+      let kernelDir = targetDir </> T.unpack proposedName
+      kernelDirExists <- doesDirectoryExist kernelDir
+      when kernelDirExists $ do
+        result <- try $ removeDirectoryRecursive kernelDir
+        case result of
+          Left (_ :: IOException) -> return ()  -- Ignore removal errors for now
+          Right () -> return ()
+      return $ Right proposedName
+    else do
+      -- Check for conflicts and generate unique name if needed
+      finalName <- generateUniqueKernelName targetDir proposedName
+      return $ Right finalName
+
+-- | Generate a unique kernel name if conflicts exist (T018)
+generateUniqueKernelName :: FilePath -> Text -> IO Text
+generateUniqueKernelName targetDir baseName = do
+  let baseDir = targetDir </> T.unpack baseName
+  baseExists <- doesDirectoryExist baseDir
+  if not baseExists
+    then return baseName
+    else findAvailableName baseName 1
+  where
+    findAvailableName :: Text -> Int -> IO Text
+    findAvailableName base counter = do
+      let candidateName = base <> "-" <> T.pack (show counter)
+          candidateDir = targetDir </> T.unpack candidateName
+      candidateExists <- doesDirectoryExist candidateDir
+      if not candidateExists
+        then return candidateName
+        else findAvailableName base (counter + 1)
+
+-- | Resolve GHC path for kernel configuration (T018)
+resolveGHCPath :: InstallOptions -> IO (Either CLIDiagnostic FilePath)
+resolveGHCPath options = do
+  case ioGHCPath options of
+    Just customGHCPath -> 
+      -- Use custom GHC path if provided
+      return $ Right customGHCPath
+    Nothing -> do
+      -- Auto-detect GHC path
+      ghcPathResult <- findExecutable "ghc"
+      case ghcPathResult of
+        Nothing -> return $ Left $ ValidationError "GHC executable not found in PATH. Please specify --ghc-path or ensure GHC is installed."
+        Just ghcPath -> return $ Right ghcPath
+
+-- | Verify that kernel installation was successful (T018)
+verifyKernelInstallation :: FilePath -> IO (Either CLIDiagnostic ())
+verifyKernelInstallation kernelPath = do
+  -- Check that kernel.json file exists and is readable
+  kernelExists <- doesFileExist kernelPath
+  if not kernelExists
+    then return $ Left $ ValidationError $ "Kernel installation failed: kernel.json not found at " <> T.pack kernelPath
+    else do
+      -- Try to parse the kernel.json file to ensure it's valid
+      result <- try $ LBS.readFile kernelPath
+      case result of
+        Left (_ :: IOException) -> 
+          return $ Left $ ValidationError $ "Kernel installation verification failed: cannot read " <> T.pack kernelPath
+        Right content -> do
+          case eitherDecode content of
+            Left parseError -> 
+              return $ Left $ ValidationError $ "Kernel installation verification failed: invalid JSON in " <> T.pack kernelPath <> ": " <> T.pack parseError
+            Right (kernelJson :: Value) -> do
+              -- Validate the kernel.json structure
+              validationResult <- validateKernelJson kernelJson
+              case validationResult of
+                Left diag -> return $ Left diag
+                Right _ -> return $ Right ()

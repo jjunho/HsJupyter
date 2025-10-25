@@ -77,7 +77,7 @@ Each user story must be independently testable:
 - [x] T015 [US1] Implement Jupyter environment detection in src/HsJupyter/CLI/Install.hs
 - [x] T016 [US1] Implement kernelspec directory discovery and validation in src/HsJupyter/CLI/Install.hs
 - [x] T017 [US1] Implement kernel.json generation with constitutional compliance in src/HsJupyter/CLI/Install.hs
-- [ ] T018 [US1] Implement kernel registration and file system operations in src/HsJupyter/CLI/Install.hs
+- [x] T018 [US1] Implement kernel registration and file system operations in src/HsJupyter/CLI/Install.hs
 
 ### Constitutional Integration
 

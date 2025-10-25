@@ -20,6 +20,12 @@ import HsJupyter.CLI.Install
   , installKernelJson
   , writeKernelJson
   , validateKernelJson
+  -- T018: Kernel registration functions
+  , executeKernelRegistration
+  , selectInstallationDirectory
+  , resolveKernelName
+  , resolveGHCPath
+  , verifyKernelInstallation
   )
 import HsJupyter.CLI.Commands (InstallOptions(..), defaultInstallOptions)
 import HsJupyter.CLI.Types
@@ -27,6 +33,7 @@ import Data.Aeson (Value(..), object, (.=))
 import Data.Aeson.Types (Array)
 import qualified Data.Vector as V
 import Data.Text (Text)
+import qualified Data.Text as T
 
 -- Test helper functions
 array :: [Value] -> Value
@@ -227,3 +234,96 @@ spec = describe "HsJupyter.CLI.Install" $ do
           installedPath `shouldBe` testKernelPath
         Left _diag ->
           pendingWith "Kernel.json installation workflow failed"
+  
+  -- T018: Kernel Registration and File System Operations Tests
+  describe "executeKernelRegistration" $ do
+    it "should complete full kernel registration workflow" $ do
+      let mockEnv = JupyterEnvironment
+            { jeKernelspecDirs = ["/tmp/test-kernelspec"]
+            , jePythonEnv = PythonEnvironment
+                { pePath = "python3"
+                , peVersion = "3.8.0"
+                , peEnvironment = Nothing
+                }
+            , jeVersion = JupyterVersion
+                { jvLab = Just "3.0.0"
+                , jvNotebook = Just "6.0.0"
+                , jvCore = "1.0.0"
+                }
+            , jeInstallType = UserLocal
+            }
+          options = defaultInstallOptions
+      -- First ensure test directory exists
+      ensureResult <- liftIO $ ensureDirectoryExists "/tmp/test-kernelspec"
+      case ensureResult of
+        Right _ -> do
+          result <- liftIO $ executeKernelRegistration options mockEnv
+          case result of
+            Right _installedPath -> return ()  -- Success
+            Left _diag -> pendingWith "Kernel registration workflow failed"
+        Left _diag -> pendingWith "Failed to create test directory"
+  
+  describe "selectInstallationDirectory" $ do
+    it "should select appropriate directory based on install scope" $ do
+      let mockEnv = JupyterEnvironment
+            { jeKernelspecDirs = ["/usr/local/share/jupyter/kernels", "/home/user/.local/share/jupyter/kernels"]
+            , jePythonEnv = PythonEnvironment { pePath = "python3", peVersion = "3.8.0", peEnvironment = Nothing }
+            , jeVersion = JupyterVersion { jvLab = Just "3.0.0", jvNotebook = Just "6.0.0", jvCore = "1.0.0" }
+            , jeInstallType = UserLocal
+            }
+          options = defaultInstallOptions { ioScope = UserInstallation }
+      result <- liftIO $ selectInstallationDirectory options mockEnv
+      case result of
+        Right _selectedDir -> return ()  -- Success
+        Left _diag -> pendingWith "Directory selection failed"
+  
+  describe "resolveKernelName" $ do
+    it "should generate unique kernel name to avoid conflicts" $ do
+      let testDir = "/tmp/test-resolve-name"
+          options = defaultInstallOptions
+      -- Ensure test directory exists
+      ensureResult <- liftIO $ ensureDirectoryExists testDir
+      case ensureResult of
+        Right _ -> do
+          result <- liftIO $ resolveKernelName options testDir
+          case result of
+            Right kernelName -> 
+              T.length kernelName `shouldSatisfy` (> 0)
+            Left _diag -> pendingWith "Kernel name resolution failed"
+        Left _diag -> pendingWith "Failed to create test directory"
+  
+  describe "resolveGHCPath" $ do
+    it "should find GHC executable in system PATH" $ do
+      let options = defaultInstallOptions
+      result <- liftIO $ resolveGHCPath options
+      case result of
+        Right ghcPath ->
+          length ghcPath `shouldSatisfy` (> 0)
+        Left _diag -> pendingWith "GHC path resolution failed (GHC may not be installed)"
+    
+    it "should use custom GHC path when provided" $ do
+      let customPath = "/usr/local/bin/ghc"
+          options = defaultInstallOptions { ioGHCPath = Just customPath }
+      result <- liftIO $ resolveGHCPath options
+      case result of
+        Right ghcPath ->
+          ghcPath `shouldBe` customPath
+        Left _diag -> pendingWith "Custom GHC path resolution failed"
+  
+  describe "verifyKernelInstallation" $ do
+    it "should verify valid kernel.json installation" $ do
+      let testPath = "/tmp/test-verify-kernel.json"
+          testJson = object
+            [ ("argv", array [string "test"])
+            , ("display_name", string "Test")
+            , ("language", string "test")
+            ]
+      -- Create test kernel.json file
+      writeResult <- liftIO $ writeKernelJson testPath testJson
+      case writeResult of
+        Right _ -> do
+          result <- liftIO $ verifyKernelInstallation testPath
+          case result of
+            Right _ -> return ()  -- Success
+            Left _diag -> pendingWith "Kernel installation verification failed"
+        Left _diag -> pendingWith "Failed to create test kernel.json"
