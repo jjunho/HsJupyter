@@ -42,6 +42,7 @@ import HsJupyter.Kernel.Types
   )
 import HsJupyter.Router.RequestRouter
   ( Router
+  , RuntimeStreamChunk(..)
   , acknowledgeInterrupt
   , mkRouter
   , routeExecuteRequest
@@ -103,19 +104,20 @@ handleExecuteOnce ctx envelope = do
         outcome <- routeExecuteRequest (bridgeRouter ctx) typed
         pure (Right (outcomeEnvelopes typed outcome))
 
-    makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
-      let header = (envelopeHeader reqEnv) { msgType = "stream" }
-      in ProtocolEnvelope
-          { envelopeIdentities = [T.pack "stream"]
-          , envelopeHeader = header
-          , envelopeParent = Just (envelopeHeader reqEnv)
-          , envelopeMetadata = emptyMetadata
-          , envelopeContent = object
-              [ "name" .= name
-              , "text" .= text
-              ]
-          , envelopeSignature = ""
-          }
+makeStreamEnvelope :: ProtocolEnvelope Value -> RuntimeStreamChunk -> ProtocolEnvelope Value
+makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
+  let header = (envelopeHeader reqEnv) { msgType = "stream" }
+  in ProtocolEnvelope
+      { envelopeIdentities = [T.pack "stream"]
+      , envelopeHeader = header
+      , envelopeParent = Just (envelopeHeader reqEnv)
+      , envelopeMetadata = emptyMetadata
+      , envelopeContent = object
+          [ "name" .= name
+          , "text" .= text
+          ]
+      , envelopeSignature = ""
+      }
 
 -- | Produce an interrupt acknowledgement envelope.
 handleInterrupt

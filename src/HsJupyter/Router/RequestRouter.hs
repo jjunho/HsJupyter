@@ -2,16 +2,18 @@
 
 module HsJupyter.Router.RequestRouter
   ( Router(..)
+  , RuntimeStreamChunk(..)
   , mkRouter
   , routeExecuteRequest
   , acknowledgeInterrupt
   ) where
 
-import Data.Aeson (Value)
+import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 
 import HsJupyter.Bridge.Protocol.Envelope
   ( ExecuteRequest(..)
+  , ExecuteStatus(..)
   , InterruptReply(..)
   , MessageHeader(..)
   , ProtocolEnvelope(..)
@@ -24,8 +26,11 @@ import HsJupyter.Runtime.Manager
   )
 import HsJupyter.Runtime.SessionState
   ( ExecuteContext(..)
-  , ExecutionOutcome
+  , ExecutionOutcome(..)
+  , ExecutionStatus(..)
   , JobMetadata(..)
+  , StreamChunk(..)
+  , StreamName(..)
   )
 
 newtype Router = Router
