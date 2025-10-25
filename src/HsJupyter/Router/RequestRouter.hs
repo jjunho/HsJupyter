@@ -17,6 +17,7 @@ import HsJupyter.Bridge.Protocol.Envelope
   , MessageHeader(..)
   , ProtocolEnvelope(..)
   )
+
 import HsJupyter.Runtime.Manager
   ( RuntimeManager
   , submitExecute
@@ -75,10 +76,12 @@ data RuntimeStreamChunk = RuntimeStreamChunk
 convertOutcome :: ExecutionOutcome -> RuntimeExecutionOutcome
 convertOutcome outcome = RuntimeExecutionOutcome
   { routerStatus = convertStatus (outcomeStatus outcome)
-  , routerPayload = object
-      [ "execution_count" .= outcomeExecutionCount outcome
-      , "status" .= statusText (outcomeStatus outcome)
-      ]
+  , routerPayload = case outcomePayload outcome of
+      (payload:_) -> payload  -- Take first payload if available
+      [] -> object
+          [ "execution_count" .= outcomeExecutionCount outcome
+          , "status" .= statusText (outcomeStatus outcome)
+          ]
   , routerStreams = map convertStream (outcomeStreams outcome)
   , routerCount = outcomeExecutionCount outcome
   }

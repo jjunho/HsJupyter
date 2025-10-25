@@ -23,9 +23,9 @@ import Control.Monad.IO.Class
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Timeout (timeout)
-import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter, interpret, as, setImports)
+import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter, interpret, as, setImports, runStmt)
 
-import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings)
+import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding)
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), ghcErrorToDiagnostic, interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
@@ -71,9 +71,20 @@ evaluateExpression session code = do
 
 -- | Execute a Haskell declaration (variable/function definition)
 evaluateDeclaration :: GHCSessionState -> Text -> IO (Either GHCError [String])
-evaluateDeclaration _session _code = do
-  -- Placeholder implementation for Phase 4
-  return $ Right []
+evaluateDeclaration session code = do
+  let timeoutSeconds = compilationTimeout (sessionConfig session)
+  result <- timeout (timeoutSeconds * 1000000) $ runInterpreter $ do  -- Convert to microseconds
+    setImports ["Prelude"]  -- Start with basic Prelude imports
+    -- Execute the declaration using runStmt (for let bindings, function definitions)
+    runStmt (T.unpack code)
+  case result of
+    Nothing -> return $ Left (TimeoutError timeoutSeconds)  -- Timeout occurred
+    Just (Left err) -> return $ Left (interpretError err)   -- Interpreter error
+    Just (Right _) -> do
+      -- Extract binding names and update session state
+      let bindingNames = extractBindingNames code
+      atomically $ mapM_ (addBinding session) bindingNames
+      return $ Right bindingNames
 
 -- | Import a Haskell module with security policy checking
 importModule :: GHCSessionState -> String -> IO (Either GHCError ())

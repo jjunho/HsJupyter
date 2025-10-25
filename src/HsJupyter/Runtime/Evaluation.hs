@@ -6,15 +6,19 @@ module HsJupyter.Runtime.Evaluation
   ) where
 
 import Control.Concurrent.STM (tryReadTMVar, atomically)
+import Control.Concurrent.MVar (MVar, newMVar, modifyMVar, readMVar)
 import Data.Aeson (object, (.=), Value(..))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, getCurrentTime, diffUTCTime)
 
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic, mkError, mkInfo)
-import HsJupyter.Runtime.GHCRuntime (evaluateExpression, defaultGHCConfig)
-import HsJupyter.Runtime.GHCSession (newGHCSession)
+import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, defaultGHCConfig)
+import HsJupyter.Runtime.GHCSession (newGHCSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
+import System.IO.Unsafe (unsafePerformIO)
 import HsJupyter.Runtime.SessionState
   ( ExecutionJob(..)
   , ExecutionOutcome(..)
@@ -26,6 +30,59 @@ import HsJupyter.Runtime.SessionState
   , incrementExecutionCount
   , rssExecutionCount
   )
+
+-- | Global GHC session storage
+-- This is a temporary solution for Phase 4. In a production system,
+-- this would be managed per-user session with proper cleanup.
+{-# NOINLINE globalGHCSession #-}
+globalGHCSession :: IORef (Maybe GHCSessionState)
+globalGHCSession = unsafePerformIO (newIORef Nothing)
+
+-- | Get or create the persistent GHC session
+getOrCreateGHCSession :: IO GHCSessionState
+getOrCreateGHCSession = do
+  maybeSession <- readIORef globalGHCSession
+  case maybeSession of
+    Just session -> return session
+    Nothing -> do
+      -- Create new session with default config
+      session <- atomically $ newGHCSession defaultGHCConfig
+      writeIORef globalGHCSession (Just session)
+      return session
+
+-- | Determine if code is a declaration (let, function definition) or expression
+isDeclaration :: Text -> Bool
+isDeclaration code = 
+  let trimmed = T.strip code
+      codeStr = T.unpack trimmed
+      codeLines = lines codeStr
+  in -- Check for let bindings
+     "let " `T.isPrefixOf` trimmed ||
+     -- Check for function definitions (name followed by parameters and =)
+     any isFunctionDefinition codeLines ||
+     -- Check for simple assignments (x = ...)
+     any isSimpleAssignment codeLines
+  where
+    isFunctionDefinition line =
+      let trimmedLine = dropWhile (== ' ') line
+          words' = words trimmedLine
+      in case words' of
+           (name:params) -> '=' `elem` line && 
+                           not ("==" `isInfixOf` line) && 
+                           not ("=>" `isInfixOf` line) &&
+                           not (null name) &&
+                           all (`notElem` name) ['(', ')', '[', ']', '{', '}', '\'', '"']
+           [] -> False
+    
+    isSimpleAssignment line =
+      let trimmedLine = dropWhile (== ' ') line
+      in not (null trimmedLine) &&
+         '=' `elem` line && 
+         not ("==" `isInfixOf` line) && 
+         not ("=>" `isInfixOf` line) &&
+         not ("import " `isPrefixOf` trimmedLine) &&
+         not ("data " `isPrefixOf` trimmedLine) &&
+         not ("type " `isPrefixOf` trimmedLine)
 
 -- | Evaluate a cell within the runtime session.
 -- Uses the hint library to provide real GHC interpretation.
@@ -103,11 +160,17 @@ runGHCEvaluation
   -> ExecutionJob
   -> IO (ExecutionOutcome, RuntimeSessionState)
 runGHCEvaluation newState executionCount job = do
-  -- Create a GHC session for evaluation
-  ghcSession <- atomically $ newGHCSession defaultGHCConfig
+  -- Get or create persistent GHC session
+  ghcSession <- getOrCreateGHCSession
   
-  -- Evaluate the expression
-  result <- evaluateExpression ghcSession (jobSource job)
+  -- Evaluate the expression (or declaration based on content)
+  result <- if isDeclaration (jobSource job)
+              then do
+                declResult <- evaluateDeclaration ghcSession (jobSource job)
+                case declResult of
+                  Left err -> return $ Left err
+                  Right bindings -> return $ Right (T.pack $ "Defined: " ++ unwords bindings)
+              else evaluateExpression ghcSession (jobSource job)
   
   case result of
     Left ghcError -> do

@@ -35,7 +35,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Data.Time.Clock (getCurrentTime)
-import GHC.Natural (Natural)
+
 
 import HsJupyter.Runtime.Evaluation (evaluateCell)
 import HsJupyter.Runtime.SessionState
@@ -48,6 +48,8 @@ import HsJupyter.Runtime.SessionState
   , initialSessionState
   , ResourceBudget(..)
   )
+import HsJupyter.Runtime.GHCSession (GHCSessionState)
+import HsJupyter.Runtime.GHCRuntime (defaultGHCConfig)
 
 -- | Handle exposed to router/kernel for submitting jobs and interrupts.
 data RuntimeManager = RuntimeManager
@@ -67,11 +69,11 @@ enqueueInterrupt mgr = rmInterrupt mgr
 
 withRuntimeManager
   :: ResourceBudget
-  -> Natural -- ^ queue capacity
+  -> Int -- ^ queue capacity  
   -> (RuntimeManager -> IO a)
   -> IO a
 withRuntimeManager budget capacity action = do
-  queue <- newTBQueueIO capacity
+  queue <- newTBQueueIO (fromIntegral capacity)
   cancelMap <- newTVarIO Map.empty
   stateVar <- newTVarIO (initialSessionState budget)
   bracket (spawnWorker queue cancelMap stateVar)

@@ -37,9 +37,7 @@ import HsJupyter.Bridge.JupyterBridge
 import HsJupyter.Runtime.Manager
   ( withRuntimeManager
   )
-import HsJupyter.Runtime.SessionState
-  ( ResourceBudget(..)
-  )
+import HsJupyter.Runtime.SessionState (ResourceBudget(..))
 import HsJupyter.Bridge.Protocol.Codec
   ( EnvelopeFrameError(..)
   , parseEnvelopeFrames

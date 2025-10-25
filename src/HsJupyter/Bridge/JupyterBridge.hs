@@ -41,10 +41,6 @@ import HsJupyter.Router.RequestRouter
   )
 import HsJupyter.Runtime.Manager
   ( RuntimeManager
-  , withRuntimeManager
-  )
-import HsJupyter.Runtime.SessionState
-  ( ResourceBudget(..)
   )
 
 -- | Operational context shared by bridge handlers.
@@ -107,7 +103,7 @@ handleExecuteOnce ctx envelope = do
       , executeReplyPayload = [routerPayload outcome]
       }
 
-    makeStreamEnvelope reqEnv (RuntimeStreamChunk name chunkText) =
+    makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
       let header = (envelopeHeader reqEnv) { msgType = "stream" }
       in ProtocolEnvelope
           { envelopeIdentities = [T.pack "stream"]
@@ -116,7 +112,7 @@ handleExecuteOnce ctx envelope = do
           , envelopeMetadata = emptyMetadata
           , envelopeContent = object
               [ "name" .= name
-              , "text" .= chunkText
+              , "text" .= text
               ]
           , envelopeSignature = ""
           }

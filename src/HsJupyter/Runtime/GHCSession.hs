@@ -14,6 +14,7 @@ module HsJupyter.Runtime.GHCSession
   , listBindings
   , addImportedModule
   , listImportedModules
+  , extractBindingNames
     
     -- * Session lifecycle
   , withGHCSession
@@ -22,20 +23,30 @@ module HsJupyter.Runtime.GHCSession
 
 import Control.Concurrent.STM
 import Control.Monad.IO.Class
+import Data.List (isPrefixOf, isInfixOf)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
+import qualified Data.Text as T
 import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter)
 
 import HsJupyter.Runtime.SessionState (ResourceBudget)
 
 -- | Persistent interpreter state across notebook cell executions
 data GHCSessionState = GHCSessionState
-  { interpreterInitialized :: Bool              -- Whether interpreter has been set up
+  { sessionId :: String                        -- Unique session identifier
   , definedBindings :: TVar (Set String)       -- Thread-safe tracking of defined variables/functions
   , importedModules :: TVar [String]           -- List of successfully imported modules (ModuleName later)
   , sessionConfig :: GHCConfig                 -- Configuration including timeout values and import policy
-  } 
+  , interpreterState :: TVar InterpreterState  -- Current interpreter state
+  }
+
+-- | State of the hint interpreter
+data InterpreterState 
+  = NotInitialized                             -- No interpreter created yet
+  | Initialized                                -- Interpreter ready for use
+  | Failed String                              -- Interpreter failed to initialize
+  deriving (Show, Eq) 
 
 -- | Configuration for GHC evaluation behavior and security policies
 data GHCConfig = GHCConfig
@@ -62,11 +73,13 @@ newGHCSession :: GHCConfig -> STM GHCSessionState
 newGHCSession config = do
   bindings <- newTVar Set.empty
   modules <- newTVar []
+  interpreterSt <- newTVar NotInitialized
   return $ GHCSessionState
-    { interpreterInitialized = False  -- Will be initialized when first used
+    { sessionId = "default-session"  -- TODO: Generate unique session ID
     , definedBindings = bindings
     , importedModules = modules
     , sessionConfig = config
+    , interpreterState = interpreterSt
     }
 
 -- | Add a new binding to the session state
@@ -95,6 +108,32 @@ withGHCSession config action = do
   session <- newGHCSession config
   result <- action session
   return $ Right result  -- Error handling will be improved in later tasks
+
+-- | Extract binding names from Haskell declaration code
+extractBindingNames :: Text -> [String]
+extractBindingNames code = 
+  let codeStr = T.unpack $ T.strip code
+      lines' = lines codeStr
+  in concatMap extractFromLine lines'
+  where
+    extractFromLine line
+      | "let " `isPrefixOf` (dropWhile (== ' ') line) = 
+          extractLetBinding (dropWhile (== ' ') line)
+      | any (`elem` line) ['='] && not ("==" `isInfixOf` line) && not ("=>" `isInfixOf` line) =
+          extractFunctionBinding line
+      | otherwise = []
+    
+    extractLetBinding line = 
+      case words (drop 4 line) of  -- drop "let "
+        (name:_) -> [takeWhile (\c -> c /= '=' && c /= ' ') name]
+        [] -> []
+    
+    extractFunctionBinding line =
+      case words line of
+        (name:_) -> [takeWhile (\c -> c /= '=' && c /= ' ' && c /= '(') name]
+        [] -> []
+    
+    -- elem function is already defined in Prelude
 
 -- | Cleanup session resources
 cleanupSession :: GHCSessionState -> STM ()
