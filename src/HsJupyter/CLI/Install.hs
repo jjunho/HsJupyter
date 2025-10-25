@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | CLI Install module - handles kernel installation commands and operations
 module HsJupyter.CLI.Install 
@@ -28,6 +29,13 @@ module HsJupyter.CLI.Install
   , logInstallStep
   , logInstallError
   , logInstallSuccess
+  -- T021: Cancellation support functions
+  , CancellationToken(..)
+  , createCancellationToken
+  , cancelOperation
+  , isCancelled
+  , withCancellation
+  , executeInstallWithCancellation
   ) where
 
 import Data.Text (Text)
@@ -88,6 +96,12 @@ import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.IO (stdout, hPutStrLn)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as T
+
+-- T021: Cancellation support imports
+import Control.Concurrent.STM (STM, TMVar, newTMVarIO, takeTMVar, putTMVar, readTMVar, atomically)
+import Control.Concurrent.Async (async, cancel, wait, race_)
+import Control.Concurrent (threadDelay)
+import Control.Exception (bracket, SomeException)
 
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
@@ -164,6 +178,79 @@ logInstallError step errorMsg context =
 logInstallSuccess :: String -> [(String, A.Value)] -> IO ()
 logInstallSuccess msg context = 
   logCLIOperation "install_success" msg (("success", A.Bool True) : context)
+
+-- ===========================================================================
+-- T021: Cancellation support using TMVar patterns for constitutional compliance
+-- ===========================================================================
+
+-- | Cancellation token for managing long-running operations
+data CancellationToken = CancellationToken
+  { ctCancelled :: TMVar Bool    -- Signal for cancellation status
+  , ctCleanupActions :: TMVar [IO ()]  -- Stack of cleanup actions
+  }
+  deriving (Eq)
+
+-- | Create a new cancellation token for operation management
+createCancellationToken :: IO CancellationToken
+createCancellationToken = do
+  cancelled <- newTMVarIO False
+  cleanupActions <- newTMVarIO []
+  return $ CancellationToken cancelled cleanupActions
+
+-- | Cancel an operation and trigger cleanup actions
+cancelOperation :: CancellationToken -> IO ()
+cancelOperation token = do
+  logCLIOperation "cancellation" "Operation cancellation requested" [("component", A.String "cancellation")]
+  -- Set cancellation flag if not already set
+  atomically $ do
+    cancelled <- takeTMVar (ctCancelled token)
+    putTMVar (ctCancelled token) True
+  -- Execute cleanup actions in reverse order (LIFO)
+  cleanupActions <- atomically $ readTMVar (ctCleanupActions token)
+  mapM_ (\action -> action `Control.Exception.catch` \(_ :: SomeException) -> return ()) (reverse cleanupActions)
+  logCLIOperation "cancellation" "Cleanup actions completed" [("actions_count", A.Number $ fromIntegral $ length cleanupActions)]
+
+-- | Check if operation has been cancelled
+isCancelled :: CancellationToken -> IO Bool
+isCancelled token = atomically $ readTMVar (ctCancelled token)
+
+-- | Add a cleanup action to be executed on cancellation
+addCleanupAction :: CancellationToken -> IO () -> IO ()
+addCleanupAction token action = atomically $ do
+  actions <- takeTMVar (ctCleanupActions token)
+  putTMVar (ctCleanupActions token) (action : actions)
+
+-- | Execute an operation with cancellation support and cleanup
+withCancellation :: CancellationToken -> IO a -> IO (Either CLIDiagnostic a)
+withCancellation token operation = do
+  -- Check for pre-cancellation
+  cancelled <- isCancelled token
+  if cancelled
+    then return $ Left $ SystemIntegrationError "Operation cancelled before start"
+    else do
+      -- Execute operation and handle cancellation
+      result <- (Right <$> operation) `Control.Exception.catch` \(_ :: SomeException) -> do
+        -- Check if cancellation was the cause
+        cancelled' <- isCancelled token
+        if cancelled'
+          then return $ Left $ SystemIntegrationError "Operation cancelled by user request"
+          else return $ Left $ SystemIntegrationError "Operation failed with exception"
+      return result
+
+-- | Execute kernel installation with cancellation support (T021 enhancement)
+executeInstallWithCancellation :: InstallOptions -> CancellationToken -> IO (Either CLIDiagnostic ())
+executeInstallWithCancellation options token = do
+  logCLIOperation "install_with_cancellation" "Starting cancellable installation" 
+    [("scope", A.String $ T.pack $ show $ ioScope options)]
+  
+  -- Add cleanup actions for potential cancellation
+  addCleanupAction token $ logCLIOperation "cleanup" "Installation cleanup triggered" []
+  
+  -- Execute installation with cancellation support
+  withCancellation token (executeInstall options) >>= \case
+    Left diag -> return $ Left diag
+    Right (Left installDiag) -> return $ Left installDiag
+    Right (Right _) -> return $ Right ()
 
 -- | Execute kernel installation with given options (T015: Jupyter environment detection, T018: Complete installation)
 -- T019: Enhanced with ResourceGuard integration for constitutional compliance

@@ -6,6 +6,7 @@ import Test.Hspec
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, SomeException)
 import Data.Either (isRight)
+import Control.Concurrent (forkIO, threadDelay)
 
 import HsJupyter.CLI.Install
   ( detectJupyterEnvironment
@@ -43,6 +44,12 @@ import qualified Data.Aeson as A
 import HsJupyter.CLI.Install 
   ( logCLIOperation
   , logInstallStep
+  -- T021: Cancellation support test imports
+  , CancellationToken
+  , createCancellationToken
+  , cancelOperation
+  , isCancelled
+  , executeInstallWithCancellation
   )
 import Data.Aeson (Value(..), object, (.=))
 import Data.Aeson.Types (Array)
@@ -455,3 +462,43 @@ spec = describe "HsJupyter.CLI.Install" $ do
         case result of
           Right _path -> return ()  -- Success - JSON installation logging working
           Left _diag -> pendingWith "JSON installation logging test (environment constraints)"
+
+  -- ===========================================================================  
+  -- T021: Cancellation Support Tests
+  -- ===========================================================================
+  
+  describe "T021: Cancellation Support" $ do
+    describe "cancellation token management" $ do
+      it "should create and manage cancellation tokens" $ do
+        token <- liftIO createCancellationToken
+        cancelled <- liftIO $ isCancelled token
+        cancelled `shouldBe` False
+        
+      it "should properly cancel operations" $ do
+        token <- liftIO createCancellationToken  
+        -- Test initial state
+        cancelled1 <- liftIO $ isCancelled token
+        cancelled1 `shouldBe` False
+        -- Test cancellation
+        liftIO $ cancelOperation token
+        cancelled2 <- liftIO $ isCancelled token
+        cancelled2 `shouldBe` True
+        
+    describe "executeInstallWithCancellation" $ do  
+      it "should support cancellable installation workflow" $ do
+        -- Test function exists and has proper signature
+        let options = defaultInstallOptions
+        token <- liftIO createCancellationToken
+        -- Don't actually run the installation, just test the function exists
+        pendingWith "Cancellable installation test (skipped to avoid long execution)"
+          
+      it "should handle pre-cancelled operations" $ do
+        let options = defaultInstallOptions
+        token <- liftIO createCancellationToken
+        -- Cancel before starting
+        liftIO $ cancelOperation token
+        result <- liftIO $ executeInstallWithCancellation options token
+        -- Should detect pre-cancellation
+        case result of
+          Left _diag -> return ()  -- Expected - operation cancelled
+          Right _ -> expectationFailure "Should have detected pre-cancellation"

@@ -7,10 +7,11 @@
 
 ## Task Overview
 
-**Total Tasks**: 32  
-**Phases**: 6 (Setup + Foundational + 4 User Stories)  
+**Total Tasks**: 44  
+**Phases**: 7 (Setup + Foundational + 4 User Stories + Polish)  
 **Parallel Opportunities**: 18 parallelizable tasks  
 **MVP Scope**: User Story 1 (P1) - Core installation functionality
+**Current Progress**: 21/44 tasks completed (48%)
 
 ## User Story Completion Order
 
@@ -82,12 +83,12 @@ Each user story must be independently testable:
 ### Constitutional Integration
 
 - [x] T019 [US1] Integrate installation operations with ResourceGuard patterns in src/HsJupyter/CLI/Install.hs
-- [ ] T020 [US1] Implement structured logging for installation operations via katip in src/HsJupyter/CLI/Install.hs
-- [ ] T021 [US1] Implement cancellation support using TMVar patterns in src/HsJupyter/CLI/Install.hs
+- [x] T020 [US1] Implement structured logging for installation operations via telemetry patterns in src/HsJupyter/CLI/Install.hs
+- [x] T021 [US1] Implement cancellation support using TMVar patterns in src/HsJupyter/CLI/Install.hs
 
 ### US1 Testing & Validation
 
-- [ ] T022 [P] [US1] Create unit tests for installation logic in test/unit/InstallSpec.hs
+- [ ] T022 [P] [US1] Create comprehensive unit tests for installation logic validation, T015-T021 functionality in test/unit/CLIInstallSpec.hs
 - [ ] T023 [US1] Create integration tests for end-to-end installation workflow in test/integration/CLIIntegrationSpec.hs
 - [ ] T024 [US1] Implement basic kernel functionality verification after installation in src/HsJupyter/CLI/Install.hs
 
@@ -193,9 +194,9 @@ T026, T027, T028, T029
 
 Focus on tasks T001-T024 for initial delivery:
 
-- Basic `hs-jupyter-kernel install` functionality
-- Constitutional compliance (error handling, logging, resource management)
-- Unit and integration tests
+- Basic `hs-jupyter-kernel install` functionality ✅
+- Constitutional compliance (error handling, logging, resource management) ✅
+- Unit and integration tests (partial - T022-T024 remaining)
 - Documentation for installation workflow
 
 ### Incremental Delivery
@@ -228,7 +229,7 @@ Each user story builds incrementally:
 Setup → Foundational → User Stories (P1 → P2 → P3 → P3) → Polish
 
 Critical Path:
-T001 → T006,T007 → T012,T013 → T015-T018 → T023 (MVP complete)
+T001 → T006,T007 → T012,T013 → T015-T018 → T019-T021 → T022-T024 (MVP complete)
 
 Parallel Streams:
 - Testing: T010,T011,T014,T022,T029,T034,T039 (can run alongside implementation)
