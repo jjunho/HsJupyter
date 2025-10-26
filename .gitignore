@@ -71,3 +71,7 @@ Thumbs.db
 *.key
 *.crt
 secrets/
+
+# Debug/dump files
+all.txt
+docs.txt
