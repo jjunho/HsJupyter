@@ -36,12 +36,15 @@ testExecuteContext msgId = ExecuteContext
 -- Helper to extract text value from ExecutionOutcome payload
 -- | Extract the first String value from an ExecutionOutcome payload.
 -- This handles multiple values and skips non-String types.
+-- | Helper to extract the first text value from ExecutionOutcome payload.
+-- This is robust to multiple values and non-String types in the payload.
 outcomeValue :: ExecutionOutcome -> Maybe Text
-outcomeValue outcome = firstString (outcomePayload outcome)
+outcomeValue outcome = findFirstString (outcomePayload outcome)
   where
-    firstString [] = Nothing
-    firstString (String txt : _) = Just txt
-    firstString (_ : vs) = firstString vs  -- Skip non-String values
+    findFirstString :: [Value] -> Maybe Text
+    findFirstString [] = Nothing
+    findFirstString (String txt : _) = Just txt
+    findFirstString (_ : vs) = findFirstString vs
 
 -- Helper to create test metadata
 testJobMetadata :: JobMetadata
@@ -293,7 +296,9 @@ spec = describe "GHC Notebook Integration" $ do
         length (outcomeDiagnostics outcome) `shouldSatisfy` (> 0)
 
     it "enforces memory limits during execution" $ do
-      -- Use a very restrictive memory budget for testing
+      -- NOTE: The memory limit enforcement mechanism is not yet fully implemented.
+      -- This test verifies that a small, valid operation completes successfully under a restrictive budget.
+      -- When memory limits are implemented, this test should be updated to force an ExecutionError.
       let restrictiveMemoryBudget = ResourceBudget
             { rbCpuTimeout = 30  -- Normal timeout
             , rbMemoryLimit = 1024 * 1024 * 10  -- Only 10MB memory limit
@@ -302,24 +307,24 @@ spec = describe "GHC Notebook Integration" $ do
             }
       
       withRuntimeManager restrictiveMemoryBudget 10 $ \manager -> do
-        -- TODO: Memory limit enforcement not yet fully implemented
-        -- This test currently validates that small computations work within limits
-        -- When memory monitoring is implemented, test should use:
-        -- "import Control.Exception (evaluate) >> evaluate (length [1..2000000 :: Int])"
-        -- and expect ExecutionError due to exceeding 10MB limit
-        
-        -- For now, test that normal operations work
+        -- Submit a computation that uses minimal memory. This should pass.
         let ctx = testExecuteContext "ghc-memory-001"
-        outcome <- submitGHCExecute manager ctx testJobMetadata "sum [1..100]"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "length [1..1000]"
         
-        -- Should complete successfully with small memory usage
         outcomeStatus outcome `shouldBe` ExecutionOk
         case outcomeValue outcome of
-          Just result -> result `shouldBe` "5050"
+          Just result -> result `shouldBe` "1000"
           Nothing -> expectationFailure "Expected numeric result"
 
+      -- FUTURE TEST (when memory limits are working):
+      -- let computation = "Control.Exception.evaluate $ length [1..2000000 :: Int]"
+      -- outcome <- submitGHCExecute manager ctx testJobMetadata computation
+      -- outcomeStatus outcome `shouldBe` ExecutionError
+
     it "enforces output size limits" $ do
-      -- Use a very restrictive output budget for testing
+      -- NOTE: The output truncation mechanism is not yet fully implemented.
+      -- This test is written against the desired behavior (truncating output to rbMaxStreamBytes).
+      -- CURRENT BUG: The output is not being truncated and returns its full size.
       let restrictiveOutputBudget = ResourceBudget
             { rbCpuTimeout = 30  -- Normal timeout
             , rbMemoryLimit = 1024 * 1024 * 200  -- Normal memory
@@ -328,22 +333,16 @@ spec = describe "GHC Notebook Integration" $ do
             }
       
       withRuntimeManager restrictiveOutputBudget 10 $ \manager -> do
-        -- Submit a computation that produces large output
-        -- [1..100] as String will produce way more than 100 bytes
+        -- This computation produces a string representation larger than 100 bytes
         let ctx = testExecuteContext "ghc-output-001"
         outcome <- submitGHCExecute manager ctx testJobMetadata "[1..100]"
         
-        -- TODO: Output truncation not yet implemented (see issue #XXX)
-        -- Currently the entire output is returned regardless of rbMaxStreamBytes limit
-        -- When implemented, this test should verify: T.length result <= 100
         outcomeStatus outcome `shouldBe` ExecutionOk
+        
+        -- The output should be truncated to be no longer than the limit
         case outcomeValue outcome of
-          Just result -> do
-            -- Verify output was produced
-            T.length result `shouldSatisfy` (> 0)
-            -- Document current behavior: output NOT truncated (bug)
-            -- Expected after fix: T.length result `shouldSatisfy` (<= 100)
-          Nothing -> expectationFailure "Expected output to be present"
+          Just result -> T.length result `shouldSatisfy` (<= 100)
+          Nothing -> expectationFailure "Expected output value, even if truncated"
 
     it "combines multiple resource limits effectively" $ do
       -- Use restrictive limits across all dimensions
