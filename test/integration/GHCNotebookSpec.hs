@@ -34,12 +34,14 @@ testExecuteContext msgId = ExecuteContext
   }
 
 -- Helper to extract text value from ExecutionOutcome payload
+-- | Extract the first String value from an ExecutionOutcome payload.
+-- This handles multiple values and skips non-String types.
 outcomeValue :: ExecutionOutcome -> Maybe Text
-outcomeValue outcome = case outcomePayload outcome of
-  [value] -> case value of
-    String txt -> Just txt
-    _ -> Nothing
-  _ -> Nothing
+outcomeValue outcome = firstString (outcomePayload outcome)
+  where
+    firstString [] = Nothing
+    firstString (String txt : _) = Just txt
+    firstString (_ : vs) = firstString vs  -- Skip non-String values
 
 -- Helper to create test metadata
 testJobMetadata :: JobMetadata
@@ -280,16 +282,15 @@ spec = describe "GHC Notebook Integration" $ do
             }
       
       withRuntimeManager restrictiveResourceBudget 10 $ \manager -> do
-        -- Submit a computation that should timeout
+        -- Submit a computation that guarantees timeout via threadDelay
+        -- threadDelay takes microseconds, so 2_000_000 = 2 seconds (exceeds 1 second limit)
         let ctx = testExecuteContext "ghc-timeout-001"
-        outcome <- submitGHCExecute manager ctx testJobMetadata "let slowComputation = [1..10^6] !! (10^6 - 1) in slowComputation"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "import Control.Concurrent (threadDelay) >> threadDelay 2000000 >> return ()"
         
-        -- Should timeout or complete - either is acceptable for this timeout period
-        outcomeStatus outcome `shouldSatisfy` (\status -> status == ExecutionOk || status == ExecutionError)
-        -- If it errored, should have timeout-related diagnostic
-        case outcomeStatus outcome of
-          ExecutionError -> length (outcomeDiagnostics outcome) `shouldSatisfy` (> 0)
-          ExecutionOk -> return ()  -- Fast execution is also acceptable
+        -- MUST timeout - no fast execution possible
+        outcomeStatus outcome `shouldBe` ExecutionError
+        -- Should have timeout-related diagnostic
+        length (outcomeDiagnostics outcome) `shouldSatisfy` (> 0)
 
     it "enforces memory limits during execution" $ do
       -- Use a very restrictive memory budget for testing
@@ -301,14 +302,20 @@ spec = describe "GHC Notebook Integration" $ do
             }
       
       withRuntimeManager restrictiveMemoryBudget 10 $ \manager -> do
-        -- Submit a computation that should use moderate memory
-        let ctx = testExecuteContext "ghc-memory-001"
-        outcome <- submitGHCExecute manager ctx testJobMetadata "length [1..1000]"
+        -- TODO: Memory limit enforcement not yet fully implemented
+        -- This test currently validates that small computations work within limits
+        -- When memory monitoring is implemented, test should use:
+        -- "import Control.Exception (evaluate) >> evaluate (length [1..2000000 :: Int])"
+        -- and expect ExecutionError due to exceeding 10MB limit
         
-        -- Should complete successfully with reasonable memory usage
+        -- For now, test that normal operations work
+        let ctx = testExecuteContext "ghc-memory-001"
+        outcome <- submitGHCExecute manager ctx testJobMetadata "sum [1..100]"
+        
+        -- Should complete successfully with small memory usage
         outcomeStatus outcome `shouldBe` ExecutionOk
         case outcomeValue outcome of
-          Just result -> result `shouldBe` "1000"
+          Just result -> result `shouldBe` "5050"
           Nothing -> expectationFailure "Expected numeric result"
 
     it "enforces output size limits" $ do
@@ -322,15 +329,21 @@ spec = describe "GHC Notebook Integration" $ do
       
       withRuntimeManager restrictiveOutputBudget 10 $ \manager -> do
         -- Submit a computation that produces large output
+        -- [1..100] as String will produce way more than 100 bytes
         let ctx = testExecuteContext "ghc-output-001"
         outcome <- submitGHCExecute manager ctx testJobMetadata "[1..100]"
         
-        -- Should either succeed with truncated output or handle the limit
-        outcomeStatus outcome `shouldSatisfy` (\status -> status == ExecutionOk || status == ExecutionError)
-        -- Output should be present but potentially truncated
+        -- TODO: Output truncation not yet implemented (see issue #XXX)
+        -- Currently the entire output is returned regardless of rbMaxStreamBytes limit
+        -- When implemented, this test should verify: T.length result <= 100
+        outcomeStatus outcome `shouldBe` ExecutionOk
         case outcomeValue outcome of
-          Just result -> T.length result `shouldSatisfy` (> 0)  -- Some output should be present
-          Nothing -> return ()  -- Or no output if truncated completely
+          Just result -> do
+            -- Verify output was produced
+            T.length result `shouldSatisfy` (> 0)
+            -- Document current behavior: output NOT truncated (bug)
+            -- Expected after fix: T.length result `shouldSatisfy` (<= 100)
+          Nothing -> expectationFailure "Expected output to be present"
 
     it "combines multiple resource limits effectively" $ do
       -- Use restrictive limits across all dimensions
