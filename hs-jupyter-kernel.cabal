@@ -64,6 +64,7 @@ library
                      , HsJupyter.Runtime.ResourceGuard
                      , HsJupyter.Runtime.Telemetry
                      , HsJupyter.CLI.Commands
+                     , HsJupyter.CLI.Doctor
                      , HsJupyter.CLI.Install
                      , HsJupyter.CLI.Types
                      , HsJupyter.CLI.Utilities
@@ -102,6 +103,7 @@ test-suite unit
     CLIInstallSpec
     CLITypesSpec
     DiagnosticsSpec
+    DoctorSpec
     ErrorHandlingSpec
     GHCDiagnosticsSpec
     GHCRuntimeSpec
@@ -124,6 +126,7 @@ test-suite unit
     , hs-jupyter-kernel
     , hspec                 >=2.10
     , hspec-core
+    , QuickCheck
     , text
     , time
     , unordered-containers

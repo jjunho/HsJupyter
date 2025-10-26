@@ -14,6 +14,9 @@ import HsJupyter.KernelProcess
   , runKernel
   , summariseConfig
   )
+import HsJupyter.CLI.Commands (parseCommand, CLICommand(..))
+import HsJupyter.CLI.Install (executeInstall)
+import HsJupyter.CLI.Doctor (executeDiagnostics)
 
 -- | Application modes: either run kernel server or CLI commands
 data AppMode
@@ -41,6 +44,27 @@ kernelOptionsParser = KernelOptions
        <> help "Log level (Debug|Info|Warn|Error)"
         ))
 
+-- | Execute CLI commands
+executeCLICommand :: CLICommand -> IO ()
+executeCLICommand cmd = case cmd of
+  InstallCommand globalOpts installOpts -> do
+    result <- executeInstall installOpts
+    case result of
+      Left err -> die $ "Installation failed: " ++ show err
+      Right _ -> putStrLn "Installation completed successfully"
+      
+  DoctorCommand globalOpts -> do
+    result <- executeDiagnostics globalOpts
+    case result of
+      Left err -> die $ "Diagnostics failed: " ++ show err
+      Right _ -> putStrLn "Diagnostics completed successfully"
+      
+  UninstallCommand _globalOpts -> do
+    putStrLn "Uninstall command not yet implemented"
+    
+  ListCommand _globalOpts -> do
+    putStrLn "List command not yet implemented"
+
 -- | Determine application mode based on command line arguments
 determineMode :: [String] -> AppMode
 determineMode args = case args of
@@ -62,11 +86,10 @@ main = do
   args <- getArgs
   case determineMode args of
     CLICommand cliArgs -> do
-      -- Placeholder for CLI command handling
-      -- TODO: Implement CLI command dispatch (will be done in later tasks)
-      putStrLn $ "CLI command mode (not yet implemented): " ++ show cliArgs
-      putStrLn "Available commands: install, doctor, uninstall, list, version"
-      die "CLI commands will be implemented in subsequent tasks"
+      -- Parse and execute CLI commands
+      case parseCommand cliArgs of
+        Left parseError -> die $ "Command parsing failed: " ++ parseError
+        Right cmd -> executeCLICommand cmd
     
     KernelServer _ -> do
       -- Use existing kernel server logic

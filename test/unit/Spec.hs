@@ -4,6 +4,7 @@ import qualified CLICommandsSpec
 import qualified CLIInstallSpec
 import qualified CLITypesSpec
 import qualified DiagnosticsSpec
+import qualified DoctorSpec
 import qualified ErrorHandlingSpec
 import qualified GHCDiagnosticsSpec
 import qualified GHCRuntimeSpec
@@ -22,6 +23,7 @@ main = hspec $ do
   CLIInstallSpec.spec
   CLITypesSpec.spec
   DiagnosticsSpec.spec
+  DoctorSpec.spec
   ErrorHandlingSpec.spec
   GHCDiagnosticsSpec.spec
   GHCRuntimeSpec.spec

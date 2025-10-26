@@ -102,15 +102,15 @@ Each user story must be independently testable:
 
 ### Diagnostic Infrastructure
 
-- [ ] T025 [US2] Implement DiagnosticResult data model and analysis logic in src/HsJupyter/CLI/Doctor.hs
-- [ ] T026 [P] [US2] Implement system health checking (Jupyter, GHC, kernel status) in src/HsJupyter/CLI/Doctor.hs
-- [ ] T027 [P] [US2] Implement issue identification and severity classification in src/HsJupyter/CLI/Doctor.hs
-- [ ] T028 [P] [US2] Implement recommendation generation with actionable solutions in src/HsJupyter/CLI/Doctor.hs
+- [x] T025 [US2] Implement DiagnosticResult data model and analysis logic in src/HsJupyter/CLI/Doctor.hs
+- [x] T026 [P] [US2] Implement system health checking (Jupyter, GHC, kernel status) in src/HsJupyter/CLI/Doctor.hs
+- [x] T027 [P] [US2] Implement issue identification and severity classification in src/HsJupyter/CLI/Doctor.hs
+- [x] T028 [P] [US2] Implement recommendation generation with actionable solutions in src/HsJupyter/CLI/Doctor.hs
 
 ### US2 Testing & Integration
 
-- [ ] T029 [P] [US2] Create unit tests for diagnostic functionality in test/unit/DoctorSpec.hs
-- [ ] T030 [US2] Create integration tests for diagnostic workflows in test/integration/CLIIntegrationSpec.hs
+- [x] T029 [US2] Create unit tests for diagnostic functionality in test/unit/DoctorSpec.hs
+- [x] T030 [US2] Integrate doctor command into CLI command parser and execution flow in app/KernelMain.hs
 
 ---
 
