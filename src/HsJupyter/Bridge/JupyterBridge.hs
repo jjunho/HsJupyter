@@ -5,6 +5,7 @@ module HsJupyter.Bridge.JupyterBridge
   , BridgeError(..)
   , mkBridgeContext
   , handleExecuteOnce
+  , handleKernelInfo
   , handleInterrupt
   , logBridgeEvent
   , rejectedCount
@@ -15,6 +16,8 @@ import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (zipWith)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.UUID as UUID
+import qualified Data.UUID.V4 as UUID
 import Data.Time.Clock (getCurrentTime)
 
 import HsJupyter.Bridge.Protocol.Codec (verifySignature)
@@ -23,6 +26,8 @@ import HsJupyter.Bridge.Protocol.Envelope
   , ExecuteRequest
   , ExecuteStatus(..)
   , InterruptReply(..)
+  , KernelInfoReply(..)
+  , KernelInfoRequest
   , MessageHeader(..)
   , ProtocolEnvelope(..)
   , emptyMetadata
@@ -31,8 +36,10 @@ import HsJupyter.Bridge.Protocol.Envelope
   , envelopeIdentities
   , envelopeParent
   , fromExecuteRequest
+  , fromKernelInfoRequest
   , msgType
   , toExecuteReply
+  , toKernelInfoReply
   )
 import HsJupyter.Kernel.Types
   ( KernelProcessConfig(..)
@@ -103,6 +110,44 @@ handleExecuteOnce ctx envelope = do
       Just typed -> do
         outcome <- routeExecuteRequest (bridgeRouter ctx) typed
         pure (Right (outcomeEnvelopes typed outcome))
+
+-- | Handle kernel_info_request and return kernel_info_reply
+handleKernelInfo
+  :: BridgeContext
+  -> ProtocolEnvelope Value
+  -> IO (Either BridgeError (ProtocolEnvelope Value))
+handleKernelInfo ctx envelope = do
+  let sharedKey = key (bridgeConfig ctx)
+  if not (verifySignature sharedKey envelope)
+    then do
+      incrementRejected ctx
+      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Rejected kernel_info_request with invalid signature"
+      pure $ Left SignatureValidationFailed
+    else case fromKernelInfoRequest envelope of
+      Nothing -> do
+        logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Failed to decode kernel_info_request"
+        pure $ Left (DecodeFailure "Not a kernel_info_request")
+      Just typed -> do
+        newMsgId <- UUID.toText <$> UUID.nextRandom
+        let reply = KernelInfoReply
+              { kirProtocolVersion = "5.3"
+              , kirImplementation = "hsjupyter"
+              , kirImplementationVersion = "0.1.0"
+              , kirLanguageInfo = object
+                  [ "name" .= ("haskell" :: Text)
+                  , "version" .= ("9.12.2" :: Text)
+                  , "mimetype" .= ("text/x-haskell" :: Text)
+                  , "file_extension" .= (".hs" :: Text)
+                  , "pygments_lexer" .= ("haskell" :: Text)
+                  , "codemirror_mode" .= ("haskell" :: Text)
+                  ]
+              , kirBanner = "HsJupyter - Haskell kernel for Jupyter (GHC 9.12.2)"
+              , kirHelpLinks = []
+              , kirStatus = "ok"
+              }
+            replyEnv = toKernelInfoReply typed reply
+            updatedHeader = (envelopeHeader replyEnv) { msgId = newMsgId }
+        pure $ Right (replyEnv { envelopeHeader = updatedHeader })
 
 makeStreamEnvelope :: ProtocolEnvelope Value -> RuntimeStreamChunk -> ProtocolEnvelope Value
 makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =

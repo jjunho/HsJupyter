@@ -31,6 +31,7 @@ import HsJupyter.Bridge.JupyterBridge
   ( BridgeContext(..)
   , BridgeError(..)
   , handleExecuteOnce
+  , handleKernelInfo
   , handleInterrupt
   , logBridgeEvent
   , mkBridgeContext
@@ -166,10 +167,24 @@ shellLoop ctx keyBytes shellSock iopubSock = forever $ do
       logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed shell frame: " <> err)
     Right envelope -> do
       let payloadBytes = LBS.length (Aeson.encode (envelopeContent envelope))
+          mtype = msgType (envelopeHeader envelope)
       when (payloadBytes > payloadLimitBytes) $
         logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn
-          ("Received execute_request payload exceeding 1MB (" <> T.pack (show payloadBytes) <> " bytes)")
-      result <- handleExecuteOnce ctx envelope
+          ("Received payload exceeding 1MB (" <> T.pack (show payloadBytes) <> " bytes)")
+      
+      -- Route based on message type
+      result <- case mtype of
+        "kernel_info_request" -> do
+          infoResult <- handleKernelInfo ctx envelope
+          case infoResult of
+            Left err -> pure $ Left err
+            Right reply -> pure $ Right [reply]
+        "execute_request" -> handleExecuteOnce ctx envelope
+        _ -> do
+          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn 
+            ("Unsupported message type on shell: " <> mtype)
+          pure $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
+      
       case result of
         Left bridgeErr ->
           logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogError (bridgeErrorMessage bridgeErr)
