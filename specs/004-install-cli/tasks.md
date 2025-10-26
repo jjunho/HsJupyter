@@ -89,8 +89,8 @@ Each user story must be independently testable:
 ### US1 Testing & Validation
 
 - [x] T022 [P] [US1] Create comprehensive unit tests for installation logic validation, T015-T021 functionality in test/unit/CLIInstallSpec.hs
-- [ ] T023 [US1] Create integration tests for end-to-end installation workflow in test/integration/CLIIntegrationSpec.hs
-- [ ] T024 [US1] Implement basic kernel functionality verification after installation in src/HsJupyter/CLI/Install.hs
+- [x] T023 [US1] Create integration tests for end-to-end installation workflow in test/integration/CLIIntegrationSpec.hs
+- [x] T024 [US1] Implement basic kernel functionality verification after installation in src/HsJupyter/CLI/Install.hs
 
 ---
 

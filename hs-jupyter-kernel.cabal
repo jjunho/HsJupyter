@@ -135,6 +135,7 @@ test-suite integration
   hs-source-dirs: test/integration
   main-is:        Spec.hs
   other-modules:
+    CLIIntegrationSpec
     ExecuteEchoSpec
     GHCNotebookSpec
     RuntimeNotebookSpec
@@ -143,6 +144,8 @@ test-suite integration
     , aeson
     , async
     , bytestring
+    , directory
+    , filepath
     , hs-jupyter-kernel
     , hspec              >=2.10
     , network

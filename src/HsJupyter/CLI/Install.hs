@@ -24,6 +24,7 @@ module HsJupyter.CLI.Install
   , resolveKernelName
   , resolveGHCPath
   , verifyKernelInstallation
+  , verifyKernelInstallationWithLevel
   -- T020: Structured logging functions
   , logCLIOperation
   , logInstallStep
@@ -51,6 +52,7 @@ import System.Directory
   , getPermissions
   , writable
   , readable
+  , executable
   , getHomeDirectory
   , findExecutable
   , removeDirectoryRecursive
@@ -71,6 +73,8 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Vector as V
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (fromMaybe)
+import System.Process (readProcessWithExitCode)
+import System.Exit (ExitCode(..))
 
 -- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
 import HsJupyter.Runtime.ResourceGuard 
@@ -108,6 +112,7 @@ import HsJupyter.CLI.Types
   , CLIDiagnostic(..)
   , JupyterEnvironment(..)
   , PythonEnvironment(..)
+  , ValidationLevel(..)
   )
 import HsJupyter.CLI.Commands (InstallOptions(..))
 import qualified HsJupyter.CLI.Utilities as Utilities
@@ -744,9 +749,9 @@ executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registra
                 case installResult of
                   Left diag -> return $ Left diag
                   Right installedPath -> do
-                    -- Step 5: Verify installation success
+                    -- Step 5: Verify installation success with requested validation level (T024)
                     verificationResult <- withCLIResourceError "installation-verification" $ 
-                      verifyKernelInstallation installedPath
+                      verifyKernelInstallationWithLevel (ioValidationLevel options) installedPath
                     case verificationResult of
                       Left diag -> return $ Left diag
                       Right _ -> return $ Right installedPath
@@ -861,9 +866,49 @@ resolveGHCPath options = do
         Nothing -> return $ Left $ ValidationError "GHC executable not found in PATH. Please specify --ghc-path or ensure GHC is installed."
         Just ghcPath -> return $ Right ghcPath
 
--- | Verify that kernel installation was successful (T018)
+-- | Verify that kernel installation was successful (T018, enhanced T024)
 verifyKernelInstallation :: FilePath -> IO (Either CLIDiagnostic ())
 verifyKernelInstallation kernelPath = do
+  -- Always do basic validation first
+  basicValidationResult <- performBasicValidation kernelPath
+  case basicValidationResult of
+    Left diag -> return $ Left diag
+    Right _ -> return $ Right ()
+
+-- | Enhanced kernel installation verification with validation level support (T024)
+verifyKernelInstallationWithLevel :: ValidationLevel -> FilePath -> IO (Either CLIDiagnostic ())
+verifyKernelInstallationWithLevel validationLevel kernelPath = do
+  logInstallStep "verification" ("Starting kernel verification at level: " ++ show validationLevel) 
+    [("kernel_path", A.String $ T.pack kernelPath)]
+  
+  case validationLevel of
+    NoValidation -> do
+      logInstallStep "verification" "Skipping validation (NoValidation level)" []
+      return $ Right ()
+      
+    BasicValidation -> do
+      logInstallStep "verification" "Performing basic validation" []
+      performBasicValidation kernelPath
+      
+    FullValidation -> do
+      logInstallStep "verification" "Performing full kernel functionality validation" []
+      -- First do basic validation
+      basicResult <- performBasicValidation kernelPath
+      case basicResult of
+        Left diag -> return $ Left diag
+        Right _ -> do
+          -- Then perform full kernel functionality test
+          functionalityResult <- performKernelFunctionalityTest kernelPath
+          case functionalityResult of
+            Left diag -> return $ Left diag
+            Right _ -> do
+              logInstallSuccess "Kernel functionality verification completed successfully" 
+                [("validation_level", A.String "full")]
+              return $ Right ()
+
+-- | Perform basic validation (file existence, JSON validity, structure) (T024)
+performBasicValidation :: FilePath -> IO (Either CLIDiagnostic ())
+performBasicValidation kernelPath = do
   -- Check that kernel.json file exists and is readable
   kernelExists <- doesFileExist kernelPath
   if not kernelExists
@@ -884,3 +929,156 @@ verifyKernelInstallation kernelPath = do
               case validationResult of
                 Left diag -> return $ Left diag
                 Right _ -> return $ Right ()
+
+-- | Perform kernel functionality test by attempting basic operations (T024 implementation)
+performKernelFunctionalityTest :: FilePath -> IO (Either CLIDiagnostic ())
+performKernelFunctionalityTest kernelPath = withErrorContext "kernel-functionality-test" $ do
+  logInstallStep "functionality-test" "Testing basic kernel functionality" 
+    [("kernel_path", A.String $ T.pack kernelPath)]
+  
+  -- Constitutional timeout for functionality tests (30 seconds max)
+  functionalityResult <- withCLITimeout 30 "kernel-functionality-test" $ do
+    -- Test 1: Verify GHC executable is accessible from kernel configuration
+    ghcTestResult <- testKernelGHCAccess kernelPath
+    case ghcTestResult of
+      Left diag -> return $ Left diag
+      Right _ -> do
+        -- Test 2: Verify kernel executable exists and has proper permissions
+        executableTestResult <- testKernelExecutableAccess kernelPath
+        case executableTestResult of
+          Left diag -> return $ Left diag
+          Right _ -> do
+            -- Test 3: Validate environment variables and paths
+            environmentTestResult <- testKernelEnvironment kernelPath
+            case environmentTestResult of
+              Left diag -> return $ Left diag
+              Right _ -> return $ Right ()
+  
+  return functionalityResult
+
+-- | Test GHC accessibility from kernel configuration (T024)
+testKernelGHCAccess :: FilePath -> IO (Either CLIDiagnostic ())
+testKernelGHCAccess kernelPath = do
+  -- Read kernel.json to extract GHC path
+  kernelContent <- try $ LBS.readFile kernelPath
+  case kernelContent of
+    Left (_ :: IOException) -> 
+      return $ Left $ ValidationError "Cannot read kernel.json for GHC access test"
+    Right content -> do
+      case eitherDecode content of
+        Left _ -> return $ Left $ ValidationError "Invalid kernel.json format for GHC test"
+        Right (kernelJson :: Value) -> do
+          ghcPath <- extractGHCPath kernelJson
+          case ghcPath of
+            Nothing -> 
+              return $ Left $ ValidationError "No GHC path found in kernel environment configuration"
+            Just path -> do
+              -- Test if GHC executable exists and is executable
+              ghcExists <- doesFileExist path
+              if ghcExists
+                then do
+                  -- Test basic GHC version check (quick validation)
+                  versionResult <- try $ do
+                    result <- System.Timeout.timeout 5000000 $ -- 5 second timeout
+                      readProcessWithExitCode path ["--version"] ""
+                    return result
+                  case versionResult of
+                    Left (_ :: SomeException) -> 
+                      return $ Left $ ValidationError $ "GHC executable test failed: " <> T.pack path
+                    Right Nothing ->
+                      return $ Left $ ValidationError $ "GHC version check timed out: " <> T.pack path
+                    Right (Just (exitCode, _, _)) -> 
+                      case exitCode of
+                        ExitSuccess -> return $ Right ()
+                        _ -> return $ Left $ ValidationError $ "GHC version check failed: " <> T.pack path
+                else return $ Left $ ValidationError $ "GHC executable not found: " <> T.pack path
+
+-- | Test kernel executable accessibility (T024)
+testKernelExecutableAccess :: FilePath -> IO (Either CLIDiagnostic ())
+testKernelExecutableAccess kernelPath = do
+  -- Read kernel.json to extract kernel executable path
+  kernelContent <- try $ LBS.readFile kernelPath
+  case kernelContent of
+    Left (_ :: IOException) -> 
+      return $ Left $ ValidationError "Cannot read kernel.json for executable test"
+    Right content -> do
+      case eitherDecode content of
+        Left _ -> return $ Left $ ValidationError "Invalid kernel.json format for executable test"
+        Right (kernelJson :: Value) -> do
+          executablePath <- extractKernelExecutablePath kernelJson
+          case executablePath of
+            Nothing -> 
+              return $ Left $ ValidationError "No kernel executable path found in argv configuration"
+            Just path -> do
+              -- Test if kernel executable exists and has proper permissions
+              execExists <- doesFileExist path
+              if execExists
+                then do
+                  -- Check executable permissions
+                  perms <- getPermissions path
+                  if executable perms
+                    then return $ Right ()
+                    else return $ Left $ ValidationError $ "Kernel executable lacks execute permissions: " <> T.pack path
+                else return $ Left $ ValidationError $ "Kernel executable not found: " <> T.pack path
+
+-- | Test kernel environment configuration (T024)
+testKernelEnvironment :: FilePath -> IO (Either CLIDiagnostic ())
+testKernelEnvironment kernelPath = do
+  -- Read kernel.json to validate environment variables
+  kernelContent <- try $ LBS.readFile kernelPath
+  case kernelContent of
+    Left (_ :: IOException) -> 
+      return $ Left $ ValidationError "Cannot read kernel.json for environment test"
+    Right content -> do
+      case eitherDecode content of
+        Left _ -> return $ Left $ ValidationError "Invalid kernel.json format for environment test"  
+        Right (kernelJson :: Value) -> do
+          -- Validate required fields and environment configuration
+          envValidation <- validateEnvironmentConfiguration kernelJson
+          case envValidation of
+            Left diag -> return $ Left diag
+            Right _ -> return $ Right ()
+
+-- | Extract GHC path from kernel.json environment configuration (T024)
+extractGHCPath :: Value -> IO (Maybe FilePath)
+extractGHCPath kernelJson = do
+  case kernelJson of
+    Object obj -> do
+      case KM.lookup (K.fromText "env") obj of
+        Just (Object envObj) -> do
+          case KM.lookup (K.fromText "GHC_PATH") envObj of
+            Just (String ghcPath) -> return $ Just $ T.unpack ghcPath
+            _ -> return Nothing
+        _ -> return Nothing
+    _ -> return Nothing
+
+-- | Extract kernel executable path from kernel.json argv configuration (T024)
+extractKernelExecutablePath :: Value -> IO (Maybe FilePath)
+extractKernelExecutablePath kernelJson = do
+  case kernelJson of
+    Object obj -> do
+      case KM.lookup (K.fromText "argv") obj of
+        Just (Array argvArray) -> do
+          case V.toList argvArray of
+            (String execPath : _) -> return $ Just $ T.unpack execPath
+            _ -> return Nothing
+        _ -> return Nothing
+    _ -> return Nothing
+
+-- | Validate environment configuration completeness (T024)
+validateEnvironmentConfiguration :: Value -> IO (Either CLIDiagnostic ())
+validateEnvironmentConfiguration kernelJson = do
+  case kernelJson of
+    Object obj -> do
+      -- Check for required fields
+      let requiredFields = ["argv", "display_name", "language"]
+      missingFields <- filterM (isFieldMissing obj) requiredFields
+      if null missingFields
+        then return $ Right ()
+        else return $ Left $ ValidationError $ 
+          "Missing required kernel.json fields: " <> T.pack (show missingFields)
+    _ -> return $ Left $ ValidationError "kernel.json must be a JSON object"
+  where
+    isFieldMissing :: Object -> Text -> IO Bool
+    isFieldMissing obj fieldName = 
+      return $ not $ KM.member (K.fromText fieldName) obj
