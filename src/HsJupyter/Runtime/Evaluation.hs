@@ -6,7 +6,7 @@ module HsJupyter.Runtime.Evaluation
   ) where
 
 import Control.Concurrent.STM (tryReadTMVar, atomically)
-import Control.Concurrent.MVar (MVar, newMVar, modifyMVar, readMVar)
+-- MVar not needed here; concurrent coordination uses STM in this module
 import Data.Aeson (object, (.=), Value(..))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf)
