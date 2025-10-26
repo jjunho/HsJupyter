@@ -96,9 +96,9 @@ if [[ -f kernelspec/hsjupyter/logo-32x32.png ]]; then
   cp kernelspec/hsjupyter/logo-32x32.png "$WORKDIR/"
 fi
 
-# Install kernelspec
+# Install kernelspec with explicit name
 echo "Installing kernelspec (scope: $INSTALL_SCOPE) using kernel binary: $KERNEL_BIN_ABS"
-jupyter kernelspec install "$WORKDIR" $INSTALL_SCOPE --replace
+jupyter kernelspec install "$WORKDIR" $INSTALL_SCOPE --replace --name hsjupyter
 
 echo "Installed kernelspec. Run: jupyter kernelspec list to confirm."
 
