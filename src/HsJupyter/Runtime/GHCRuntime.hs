@@ -65,24 +65,24 @@ module HsJupyter.Runtime.GHCRuntime
   ) where
 
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TMVar
+-- TMVar import removed: not needed here
 import Control.Exception (catch, evaluate)
 import Control.Monad.IO.Class
 import Data.Char (isDigit, isSpace)
 import Data.Int (Int64)
-import Data.List (isInfixOf, isPrefixOf, tails)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime, getCurrentTime, diffUTCTime, UTCTime)
 import GHC.Stats (getRTSStats, RTSStats(..))
 import System.Timeout (timeout)
-import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter, interpret, as, setImports, runStmt)
+import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImports, runStmt)
 
 import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
-import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), ghcErrorToDiagnostic, interpretError)
+import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-import HsJupyter.Runtime.ResourceGuard (ResourceGuard, ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..))
+import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..))
 
 -- | Input structure for GHC evaluation operations
 data GHCEvaluationRequest = GHCEvaluationRequest
@@ -198,13 +198,13 @@ checkMemoryLimits budget stats =
 -- | Execute action with memory monitoring
 withMemoryLimit :: ResourceBudget -> IO a -> IO (Either GHCError a)
 withMemoryLimit budget action = do
-  initialStats <- getCurrentMemoryStats
+  -- only collect final stats to determine if the action violated limits
   result <- action
   finalStats <- getCurrentMemoryStats
-  
+
   -- Force evaluation to ensure memory is actually used
   _ <- evaluate result
-  
+
   case checkMemoryLimits budget finalStats of
     Left err -> return $ Left err
     Right () -> return $ Right result
@@ -299,17 +299,19 @@ withPerformanceMonitoring opType code action = do
 
 -- | Convert ResourceViolation to GHCError
 convertResourceViolation :: ResourceViolation -> Text -> GHCError
-convertResourceViolation violation code = case violation of
-  TimeoutViolation elapsed limit -> 
+convertResourceViolation violation _code = case violation of
+  TimeoutViolation _elapsed limit ->
     TimeoutError (ceiling limit)
   MemoryViolation used limit ->
     CompilationError ("Memory limit exceeded: " <> T.pack (show used) <> "MB > " <> T.pack (show limit) <> "MB")
-                     (SourceLocation 1 1 Nothing) 
+                     (SourceLocation 1 1 Nothing)
                      ["Reduce memory usage", "Simplify computation"]
   OutputViolation size limit ->
     CompilationError ("Output limit exceeded: " <> T.pack (show size) <> " bytes > " <> T.pack (show limit) <> " bytes")
                      (SourceLocation 1 1 Nothing)
                      ["Reduce output size", "Use take or similar to limit results"]
+  ExecutionError msg ->
+    RuntimeError (T.pack msg)
 
 -- | Type of evaluation to perform
 data EvaluationType
@@ -355,6 +357,7 @@ evaluateExpressionGuarded session code = do
   return result
 
 -- | Evaluate a Haskell expression with cancellation support
+evaluateExpressionCancellable :: GHCSessionState -> Text -> CancellationToken -> IO (Either GHCError Text)
 evaluateExpressionCancellable session code token = do
   let timeoutSeconds = selectTimeout session Expression code
   result <- timeout (timeoutSeconds * 1000000) $ do
@@ -363,14 +366,27 @@ evaluateExpressionCancellable session code token = do
     if cancelled 
       then return (Left (CompilationError "Operation was cancelled" (SourceLocation 1 1 Nothing) []))
       else do
-        interpreterResult <- runInterpreter $ do
-          setImports ["Prelude"]  -- Start with basic Prelude imports
-          -- Wrap expression with 'show' to get String representation  
-          let wrappedCode = "show (" ++ T.unpack code ++ ")"
-          interpret wrappedCode (as :: String)
-        return $ case interpreterResult of
-          Left err -> Left (interpretError err)
-          Right value -> Right value
+        -- Support simple GHCi-style import commands (e.g. ":m + Data.List" or ":module + Data.List")
+        if ":" `T.isPrefixOf` code
+          then do
+            let cmd = T.unpack $ T.strip code
+            case parseGHCiImport cmd of
+              Just importStmt -> do
+                -- perform import using existing import routine which understands policy and side-effects
+                imRes <- importModuleCancellable session importStmt token
+                case imRes of
+                  Left err -> return $ Left err
+                  Right () -> return $ Right "" -- import succeeded, return empty string as expression result
+              Nothing -> return $ Left (CompilationError (T.pack ("Unsupported GHCi command: " ++ cmd)) (SourceLocation 1 1 Nothing) [])
+          else do
+            interpreterResult <- runInterpreter $ do
+              setImports ["Prelude"]  -- Start with basic Prelude imports
+              -- Wrap expression with 'show' to get String representation
+              let wrappedCode = "show (" ++ T.unpack code ++ ")"
+              interpret wrappedCode (as :: String)
+            return $ case interpreterResult of
+              Left err -> Left (interpretError err)
+              Right value -> Right value
   case result of
     Nothing -> do
       -- Check if timeout or cancellation
@@ -511,7 +527,8 @@ importModuleCancellable session importStatement token = do
                 interpreterResult <- runInterpreter $ do
                   -- Get current imports and add the new module
                   currentImports <- liftIO $ atomically $ listImportedModules session
-                  let allImports = "Prelude" : currentImports ++ [importStatement]
+                  -- setImports expects a list of module NAMES (e.g. "Data.List"), not full import statements
+                  let allImports = "Prelude" : currentImports ++ [moduleName]
                   setImports allImports
                   return ()
                 return $ case interpreterResult of
@@ -527,8 +544,8 @@ importModuleCancellable session importStatement token = do
                 else return $ Left (TimeoutError timeoutSeconds)
             Just (Left err) -> return $ Left err   -- Already converted interpreter error
             Just (Right ()) -> do
-              -- Add to imported modules list (store the full import statement)
-              atomically $ addImportedModule session importStatement
+              -- Add to imported modules list (store canonical module name)
+              atomically $ addImportedModule session moduleName
               return $ Right ()
 
 -- | Initialize a new GHC session with configuration
@@ -627,6 +644,21 @@ parseSelectiveAndAlias rest
       case break (== delim) str of
         (before, "") -> [before]
         (before, _:after) -> before : splitOn delim after
+
+
+-- | Parse simple GHCi import module commands into an import statement
+-- Examples supported:
+--  ":m + Data.List" -> "import Data.List"
+--  ":module + Data.List" -> "import Data.List"
+parseGHCiImport :: String -> Maybe String
+parseGHCiImport s =
+  let ws = words s
+  in case ws of
+    (cmd:flag:moduleName:_) | cmd `elem` [":m", ":module"] && flag `elem` ["+", "+"] ->
+      Just $ "import " ++ moduleName
+    (cmd:moduleName:_) | cmd `elem` [":m", ":module"] ->
+      Just $ "import " ++ moduleName
+    _ -> Nothing
     
 
 
@@ -662,7 +694,7 @@ isSimpleExpression code =
   let trimmed = filter (not . isSpace) code
       isShort = length code < 50
       isLiteral = all isDigit trimmed || 
-                  (not (null trimmed) && head trimmed == '"' && last trimmed == '"') ||
+                  (length trimmed >= 2 && head trimmed == '"' && last trimmed == '"') ||
                   trimmed `elem` (["True", "False"] :: [String])
       isBasicArithmetic = all (\c -> isDigit c || c `elem` ("+-*/() " :: String)) code
   in isShort && (isLiteral || isBasicArithmetic)

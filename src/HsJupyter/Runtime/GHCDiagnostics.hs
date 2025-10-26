@@ -109,17 +109,26 @@ extractUndefinedVariable msg
   | "undefined" `T.isInfixOf` T.toLower msg = extractQuotedName msg
   | otherwise = Nothing
   where
-    extractAfterColon txt = 
+    extractAfterColon txt =
       case T.splitOn ":" txt of
         (_:rest) -> case rest of
-          (name:_) -> Just $ T.strip $ T.takeWhile (/= ' ') $ T.strip name
+          (name:_) -> Just $ sanitizeName $ T.takeWhile (/= ' ') $ T.strip name
           [] -> Nothing
         [] -> Nothing
-    
+
     extractQuotedName txt =
       case T.splitOn "'" txt of
-        (_:name:_) -> Just $ T.takeWhile (/= '\'') name
+        (_:name:_) -> Just $ sanitizeName $ T.takeWhile (/= '\'') name
         _ -> Nothing
+
+    -- Remove surrounding quotes or backticks if present
+    sanitizeName t =
+      let s = T.strip t
+      in case (T.uncons s, T.unsnoc s) of
+        (Just ('\'', _), Just (_, '\'')) -> T.init $ T.tail s
+        (Just ('"', _), Just (_, '"')) -> T.init $ T.tail s
+        (Just ('`', _), Just (_, '`')) -> T.init $ T.tail s
+        _ -> s
 
 -- | Enhanced syntax error detection with specific patterns
 detectSyntaxErrorType :: Text -> Maybe SyntaxErrorType
@@ -194,7 +203,9 @@ ghcErrorToDiagnostic ghcErr = case ghcErr of
 -- | Enrich diagnostic with additional context and suggestions  
 enrichDiagnostic :: GHCError -> RuntimeDiagnostic -> RuntimeDiagnostic
 enrichDiagnostic ghcErr diagnostic = 
-  let suggestions = generateSuggestions ghcErr
+  let suggestions = case ghcErr of
+        CompilationError _ _ existing -> existing ++ generateSuggestions ghcErr
+        _ -> generateSuggestions ghcErr
   in diagnostic { rdSuggestions = rdSuggestions diagnostic ++ suggestions }
 
 -- | Generate helpful suggestions for common errors

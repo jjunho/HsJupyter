@@ -148,7 +148,8 @@ monitorResources guard actionThread = do
                 statsResult <- try getRTSStats
                 case statsResult of
                   Right stats -> do
-                    let memUsedBytes = fromIntegral (allocated_bytes stats) :: Integer
+                    -- Use max_live_bytes (approx resident/live memory) instead of cumulative allocated_bytes
+                    let memUsedBytes = fromIntegral (max_live_bytes stats) :: Integer
                         memUsedMB = fromIntegral (memUsedBytes `div` (1024 * 1024)) :: Int
                     when (memUsedMB > rcMaxMemoryMB limits) $
                       notify (MemoryViolation memUsedMB (rcMaxMemoryMB limits))
