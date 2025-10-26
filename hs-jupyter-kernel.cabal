@@ -104,6 +104,7 @@ test-suite unit
     CLICommandsSpec
     CLIInstallSpec
     CLITypesSpec
+    CrossPlatformSpec
     DiagnosticsSpec
     DoctorSpec
     ErrorHandlingSpec
@@ -111,6 +112,7 @@ test-suite unit
     GHCRuntimeSpec
     GHCSessionSpec
     ObservabilitySpec
+    PerformanceSpec
     ProtocolEnvelopeSpec
     ResourceGuardSpec
     RuntimeManagerSpec
@@ -125,6 +127,8 @@ test-suite unit
   build-depends:
     , aeson
     , bytestring
+    , clock
+    , deepseq
     , hs-jupyter-kernel
     , hspec                 >=2.10
     , hspec-core
