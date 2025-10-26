@@ -88,6 +88,7 @@ data KernelInstallation = KernelInstallation
   } deriving (Show, Eq, Generic)
 
 instance ToJSON KernelInstallation
+instance FromJSON KernelInstallation
 
 data InstallationStatus
   = Installed                    -- ^ Properly installed and functional
@@ -97,6 +98,7 @@ data InstallationStatus
   deriving (Show, Eq, Generic)
 
 instance ToJSON InstallationStatus
+instance FromJSON InstallationStatus
 
 data KernelConfig = KernelConfig
   { kcResourceLimits :: ResourceLimits    -- ^ Memory/CPU/timeout limits
@@ -107,6 +109,7 @@ data KernelConfig = KernelConfig
   } deriving (Show, Eq, Generic)
 
 instance ToJSON KernelConfig
+instance FromJSON KernelConfig
 
 data ResourceLimits = ResourceLimits
   { rlMemoryLimitMB    :: Maybe Int       -- ^ Memory limit in MB
@@ -115,11 +118,13 @@ data ResourceLimits = ResourceLimits
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ResourceLimits
+instance FromJSON ResourceLimits
 
 data InterruptMode = Signal | Message
   deriving (Show, Eq, Generic)
 
 instance ToJSON InterruptMode
+instance FromJSON InterruptMode
 
 -- | Represents user-specified installation parameters and options
 data InstallationConfiguration = InstallationConfiguration
@@ -205,11 +210,13 @@ data Issue = Issue
   } deriving (Show, Eq, Generic)
 
 instance ToJSON Issue
+instance FromJSON Issue
 
 data Severity = Critical | Major | Minor | Warning
   deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Severity
+instance FromJSON Severity
 
 data Component 
   = JupyterComponent       -- ^ Jupyter installation issues
@@ -219,6 +226,7 @@ data Component
   deriving (Show, Eq, Generic)
 
 instance ToJSON Component
+instance FromJSON Component
 
 data Recommendation = Recommendation
   { rPriority     :: Priority              -- ^ Recommendation priority
@@ -247,3 +255,32 @@ instance ToJSON SystemInformation
 -- | Type class for converting CLI diagnostics to constitutional format
 class ToDiagnostic a where
   toDiagnostic :: a -> RuntimeDiagnostic
+
+-- T038: Uninstall Command Types (Phase 6 US4)
+
+-- | Result of an uninstall operation
+data UninstallResult = UninstallResult
+  { urActions  :: [UninstallAction]        -- ^ List of actions performed
+  , urSummary  :: Text                     -- ^ Summary message
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON UninstallResult
+
+-- | Individual uninstall action performed
+data UninstallAction = UninstallAction
+  { uaType    :: UninstallActionType       -- ^ Type of action
+  , uaTarget  :: Text                      -- ^ Target of the action
+  , uaResult  :: Text                      -- ^ Result description
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON UninstallAction
+
+-- | Types of uninstall actions
+data UninstallActionType
+  = RemoveKernelspec                       -- ^ Remove kernelspec directory
+  | CleanupTemp                            -- ^ Cleanup temporary files
+  | CleanupConfig                          -- ^ Cleanup configuration files  
+  | CleanupLogs                            -- ^ Cleanup log files
+  deriving (Show, Eq, Generic)
+
+instance ToJSON UninstallActionType

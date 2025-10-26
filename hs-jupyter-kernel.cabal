@@ -17,6 +17,7 @@ common project-settings
 
   build-depends:
     , aeson                 >=2.0
+    , aeson-pretty
     , async
     , base                  >=4.14 && <5
     , bytestring
@@ -66,6 +67,7 @@ library
                      , HsJupyter.CLI.Commands
                      , HsJupyter.CLI.Doctor
                      , HsJupyter.CLI.Install
+                     , HsJupyter.CLI.Output
                      , HsJupyter.CLI.Types
                      , HsJupyter.CLI.Utilities
 
@@ -142,6 +144,7 @@ test-suite integration
     ExecuteEchoSpec
     GHCNotebookSpec
     RuntimeNotebookSpec
+    JSONOutputIntegrationSpec
   default-extensions: OverloadedStrings
   build-depends:
     , aeson
@@ -151,7 +154,9 @@ test-suite integration
     , filepath
     , hs-jupyter-kernel
     , hspec              >=2.10
+    , HUnit
     , network
+    , temporary
     , text
     , time
     , zeromq4-haskell

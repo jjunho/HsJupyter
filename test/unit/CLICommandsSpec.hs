@@ -77,7 +77,7 @@ spec = describe "HsJupyter.CLI.Commands" $ do
       let args = ["doctor"]
           result = parseCommand args
       case result of
-        Right (DoctorCommand globalOpts) -> do
+        Right (DoctorCommand globalOpts _doctorOpts) -> do
           goJSON globalOpts `shouldBe` False
         _ -> expectationFailure "Expected DoctorCommand"
     
@@ -85,7 +85,7 @@ spec = describe "HsJupyter.CLI.Commands" $ do
       let args = ["uninstall", "--verbose"]
           result = parseCommand args
       case result of
-        Right (UninstallCommand globalOpts) -> do
+        Right (UninstallCommand globalOpts _uninstallOpts) -> do
           goVerbose globalOpts `shouldBe` True
         _ -> expectationFailure "Expected UninstallCommand with verbose option"
     
@@ -93,7 +93,7 @@ spec = describe "HsJupyter.CLI.Commands" $ do
       let args = ["list"]
           result = parseCommand args
       case result of
-        Right (ListCommand _) -> return ()
+        Right (ListCommand _ _) -> return ()
         _ -> expectationFailure "Expected ListCommand"
     
     it "should handle invalid command" $ do

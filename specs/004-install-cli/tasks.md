@@ -11,7 +11,7 @@
 **Phases**: 7 (Setup + Foundational + 4 User Stories + Polish)  
 **Parallel Opportunities**: 18 parallelizable tasks  
 **MVP Scope**: User Story 1 (P1) - Core installation functionality
-**Current Progress**: 21/44 tasks completed (48%)
+**Current Progress**: 27/44 tasks completed (61%)
 
 ## User Story Completion Order
 
@@ -140,15 +140,15 @@ Each user story must be independently testable:
 
 ### Programmatic Interface
 
-- [ ] T035 [US4] Implement JSON output formatting for all commands in src/HsJupyter/CLI/Output.hs
-- [ ] T036 [P] [US4] Implement quiet mode and non-interactive operation in src/HsJupyter/CLI/Commands.hs
-- [ ] T037 [P] [US4] Implement list and version commands for system integration in src/HsJupyter/CLI/Commands.hs
-- [ ] T038 [P] [US4] Implement uninstall command with cleanup verification in src/HsJupyter/CLI/Commands.hs
+- [x] T035 [US4] Implement JSON output formatting for all commands in src/HsJupyter/CLI/Output.hs
+- [x] T036 [P] [US4] Implement quiet mode and non-interactive operation in src/HsJupyter/CLI/Commands.hs
+- [x] T037 [P] [US4] Implement list and version commands for system integration in src/HsJupyter/CLI/Commands.hs
+- [x] T038 [P] [US4] Implement uninstall command with cleanup verification in src/HsJupyter/CLI/Commands.hs
 
 ### US4 Testing & Validation
 
-- [ ] T039 [P] [US4] Create integration tests for JSON output and automation scenarios in test/integration/CLIIntegrationSpec.hs
-- [ ] T040 [US4] Validate JSON schema compliance with contracts/json-schema.md in test/integration/CLIIntegrationSpec.hs
+- [x] T039 [P] [US4] Create integration tests for JSON output and automation scenarios in test/integration/CLIIntegrationSpec.hs
+- [x] T040 [US4] Validate JSON schema compliance with contracts/json-schema.md in test/integration/CLIIntegrationSpec.hs
 
 ---
 

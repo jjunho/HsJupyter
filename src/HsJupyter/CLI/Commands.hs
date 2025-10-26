@@ -9,6 +9,11 @@ module HsJupyter.CLI.Commands
   , parseCommand
   , defaultInstallOptions
   , defaultGlobalOptions
+  -- T037: List and Version types exports
+  , ListOptions(..)
+  , VersionOptions(..)
+  -- T038: Uninstall types exports
+  , UninstallOptions(..)
   ) where
 
 import Data.Text (Text)
@@ -36,7 +41,7 @@ defaultGlobalOptions = GlobalOptions
   , goVerbose = False        -- Standard logging level
   }
 
--- | Installation command options supporting Phase 5 custom configuration
+-- | Installation command options supporting Phase 5 custom configuration + US4 non-interactive
 data InstallOptions = InstallOptions
   { ioScope            :: InstallScope     -- ^ Installation scope (user/system/auto)
   , ioForceReinstall   :: Bool             -- ^ Force overwrite existing installation
@@ -53,6 +58,45 @@ data InstallOptions = InstallOptions
   , ioResourceLimits   :: Maybe ResourceLimits -- ^ Custom resource limits
   , ioConnectionTimeout :: Maybe Int       -- ^ Custom connection timeout (seconds)
   } deriving (Show, Eq)
+
+-- | Doctor command options (Phase 6 US4)
+data DoctorOptions = DoctorOptions
+  { doCheckComponents :: [ComponentType]  -- ^ Specific components to check
+  , doFixIssues       :: Bool             -- ^ Attempt automatic fixes
+  , doReportFile      :: Maybe FilePath   -- ^ Save detailed report to file
+  } deriving (Show, Eq)
+
+-- | Uninstall command options (Phase 6 US4)
+data UninstallOptions = UninstallOptions
+  { uoRemoveAll       :: Bool             -- ^ Remove all installations
+  , uoKernelspecDir   :: Maybe FilePath   -- ^ Remove from specific directory
+  , uoConfirm         :: Bool             -- ^ Skip confirmation prompts
+  -- T038: Additional options for comprehensive uninstall
+  , uoForce           :: Bool             -- ^ Force removal even if issues detected
+  , uoCleanupAll      :: Bool             -- ^ Perform global cleanup
+  , uoRemoveConfig    :: Bool             -- ^ Remove configuration files
+  , uoRemoveLogs      :: Bool             -- ^ Remove log files
+  } deriving (Show, Eq)
+
+-- | List command options (Phase 6 US4)
+data ListOptions = ListOptions
+  { loShowAll         :: Bool             -- ^ Include non-functional installations
+  , loSearchPath      :: Maybe FilePath   -- ^ Search specific directory
+  } deriving (Show, Eq)
+
+-- | Version command options (Phase 6 US4)
+data VersionOptions = VersionOptions
+  { voCheckCompatibility :: Bool          -- ^ Check system compatibility
+  } deriving (Show, Eq)
+
+-- | Component types for doctor command
+data ComponentType
+  = JupyterComp       -- ^ Jupyter installation
+  | KernelComp        -- ^ HsJupyter kernel
+  | GHCComp           -- ^ GHC toolchain
+  | SystemComp        -- ^ System environment
+  | AllComps          -- ^ All components
+  deriving (Show, Eq)
 
 -- | Default installation options following constitutional KISS principle
 defaultInstallOptions :: InstallOptions
@@ -73,12 +117,47 @@ defaultInstallOptions = InstallOptions
   , ioConnectionTimeout = Nothing     -- Use Jupyter default timeout
   }
 
--- | Top-level CLI commands
+-- | Default doctor options (Phase 6 US4)
+defaultDoctorOptions :: DoctorOptions
+defaultDoctorOptions = DoctorOptions
+  { doCheckComponents = [AllComps]    -- Check all components by default
+  , doFixIssues = False               -- Don't auto-fix by default (safety)
+  , doReportFile = Nothing            -- No report file by default
+  }
+
+-- | Default uninstall options (Phase 6 US4)
+defaultUninstallOptions :: UninstallOptions
+defaultUninstallOptions = UninstallOptions
+  { uoRemoveAll = False               -- Don't remove all by default (safety)
+  , uoKernelspecDir = Nothing         -- Use all standard directories
+  , uoConfirm = False                 -- Require confirmation by default (safety)
+  -- T038: Additional default values
+  , uoForce = False                   -- Don't force removal by default (safety)
+  , uoCleanupAll = False              -- Don't cleanup by default
+  , uoRemoveConfig = False            -- Don't remove config by default
+  , uoRemoveLogs = False              -- Don't remove logs by default
+  }
+
+-- | Default list options (Phase 6 US4)
+defaultListOptions :: ListOptions
+defaultListOptions = ListOptions
+  { loShowAll = False                 -- Show only functional installations by default
+  , loSearchPath = Nothing            -- Search all standard paths
+  }
+
+-- | Default version options (Phase 6 US4)
+defaultVersionOptions :: VersionOptions
+defaultVersionOptions = VersionOptions
+  { voCheckCompatibility = False      -- Don't check compatibility by default (speed)
+  }
+
+-- | Top-level CLI commands with Phase 6 US4 enhancements
 data CLICommand
   = InstallCommand GlobalOptions InstallOptions
-  | DoctorCommand GlobalOptions             -- TODO: Add DoctorOptions when implementing US2
-  | UninstallCommand GlobalOptions          -- TODO: Add UninstallOptions when implementing US3
-  | ListCommand GlobalOptions               -- TODO: Add ListOptions when implementing US3
+  | DoctorCommand GlobalOptions DoctorOptions
+  | UninstallCommand GlobalOptions UninstallOptions
+  | ListCommand GlobalOptions ListOptions
+  | VersionCommand GlobalOptions VersionOptions
   deriving (Show, Eq)
 
 -- | Parse command line arguments into structured command
@@ -92,30 +171,35 @@ parseCommand args =
        Options.Applicative.Failure failure -> Left $ show failure
        Options.Applicative.CompletionInvoked _ -> Left "Completion invoked"
 
--- | Main command parser with subcommands
+-- | Main command parser with subcommands (Phase 6 US4 complete)
 commandParser :: Parser CLICommand
 commandParser = subparser $ mconcat
   [ command "install" $ info installCommandParser $ progDesc "Install HsJupyter kernel"
   , command "doctor" $ info doctorCommandParser $ progDesc "Diagnose installation issues"
   , command "uninstall" $ info uninstallCommandParser $ progDesc "Remove HsJupyter kernel"
   , command "list" $ info listCommandParser $ progDesc "List HsJupyter installations"
+  , command "version" $ info versionCommandParser $ progDesc "Show version information"
   ]
 
 -- | Install command parser
 installCommandParser :: Parser CLICommand
 installCommandParser = InstallCommand <$> globalOptionsParser <*> installOptionsParser
 
--- | Doctor command parser (placeholder for US2)
+-- | Doctor command parser (Phase 6 US4 implementation)
 doctorCommandParser :: Parser CLICommand
-doctorCommandParser = DoctorCommand <$> globalOptionsParser
+doctorCommandParser = DoctorCommand <$> globalOptionsParser <*> doctorOptionsParser
 
--- | Uninstall command parser (placeholder for US3)
+-- | Uninstall command parser (Phase 6 US4 implementation)
 uninstallCommandParser :: Parser CLICommand
-uninstallCommandParser = UninstallCommand <$> globalOptionsParser
+uninstallCommandParser = UninstallCommand <$> globalOptionsParser <*> uninstallOptionsParser
 
--- | List command parser (placeholder for US3)
+-- | List command parser (Phase 6 US4 implementation)
 listCommandParser :: Parser CLICommand
-listCommandParser = ListCommand <$> globalOptionsParser
+listCommandParser = ListCommand <$> globalOptionsParser <*> listOptionsParser
+
+-- | Version command parser (Phase 6 US4 implementation)
+versionCommandParser :: Parser CLICommand
+versionCommandParser = VersionCommand <$> globalOptionsParser <*> versionOptionsParser
 
 -- | Global options parser
 globalOptionsParser :: Parser GlobalOptions
@@ -185,6 +269,52 @@ resourceLimitsParser = optional $ ResourceLimits
   <*> optional (option auto (long "exec-timeout" <> metavar "SECONDS" <> help "Execution timeout in seconds"))
   <*> optional (option auto (long "output-limit" <> metavar "KB" <> help "Maximum output size in KB"))
 
+-- | Doctor options parser (Phase 6 US4)
+doctorOptionsParser :: Parser DoctorOptions
+doctorOptionsParser = DoctorOptions
+  <$> many (componentTypeParser)
+  <*> switch (long "fix" <> help "Attempt to automatically fix detected issues")
+  <*> optional (strOption (long "report" <> metavar "FILE" <> help "Save detailed diagnostic report to file"))
+
+-- | Component type parser for doctor command
+componentTypeParser :: Parser ComponentType
+componentTypeParser = option componentReader $
+  long "check" <> metavar "COMPONENT" <> help "Check specific component (jupyter|kernel|ghc|system|all)"
+
+-- | Component type reader
+componentReader :: ReadM ComponentType
+componentReader = eitherReader $ \case
+  "jupyter" -> Right JupyterComp
+  "kernel" -> Right KernelComp
+  "ghc" -> Right GHCComp
+  "system" -> Right SystemComp
+  "all" -> Right AllComps
+  invalid -> Left $ "Invalid component type: " ++ invalid
+
+-- | Uninstall options parser (Phase 6 US4)
+uninstallOptionsParser :: Parser UninstallOptions
+uninstallOptionsParser = UninstallOptions
+  <$> switch (long "all" <> help "Remove all HsJupyter kernel installations found")
+  <*> optional (strOption (long "kernelspec-dir" <> metavar "DIR" <> help "Remove from specific kernelspec directory"))
+  <*> switch (long "confirm" <> help "Skip confirmation prompts (use with caution)")
+  -- T038: Additional uninstall options
+  <*> switch (long "force" <> help "Force removal even if installation has issues")
+  <*> switch (long "cleanup-all" <> help "Perform global cleanup of temporary files")
+  <*> switch (long "remove-config" <> help "Remove configuration files")
+  <*> switch (long "remove-logs" <> help "Remove log files")
+
+-- | List options parser (Phase 6 US4)
+listOptionsParser :: Parser ListOptions
+listOptionsParser = ListOptions
+  <$> switch (long "all" <> help "Include non-functional and problematic installations")
+  <*> optional (strOption (long "path" <> metavar "DIR" <> help "Search specific directory for installations"))
+
+-- | Version options parser (Phase 6 US4)
+versionOptionsParser :: Parser VersionOptions
+versionOptionsParser = VersionOptions
+  <$> switch (long "check-compatibility" <> help "Check compatibility with current system")
+
 -- | Help text for CLI
 cmdHelp :: InfoMod a
 cmdHelp = briefDesc <> header "hs-jupyter-kernel - Install and manage Haskell Jupyter kernels"
+

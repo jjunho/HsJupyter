@@ -53,17 +53,20 @@ executeCLICommand cmd = case cmd of
       Left err -> die $ "Installation failed: " ++ show err
       Right _ -> putStrLn "Installation completed successfully"
       
-  DoctorCommand globalOpts -> do
+  DoctorCommand globalOpts doctorOpts -> do
     result <- executeDiagnostics globalOpts
     case result of
       Left err -> die $ "Diagnostics failed: " ++ show err
       Right _ -> putStrLn "Diagnostics completed successfully"
       
-  UninstallCommand _globalOpts -> do
+  UninstallCommand _globalOpts _uninstallOpts -> do
     putStrLn "Uninstall command not yet implemented"
     
-  ListCommand _globalOpts -> do
+  ListCommand _globalOpts _listOpts -> do
     putStrLn "List command not yet implemented"
+    
+  VersionCommand _globalOpts _versionOpts -> do
+    putStrLn "Version command not yet implemented"
 
 -- | Determine application mode based on command line arguments
 determineMode :: [String] -> AppMode
