@@ -161,13 +161,18 @@ runKernel cfg = withKernel cfg (forever (threadDelay 1000000))
 
 shellLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> Z.Socket Z.Pub -> IO ()
 shellLoop ctx keyBytes shellSock iopubSock = forever $ do
+  logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: waiting for message..."
   frames <- Z.receiveMulti shellSock
+  logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
+    ("Shell loop: received " <> T.pack (show (length frames)) <> " frames")
   case parseEnvelopeFrames frames of
-    Left (EnvelopeFrameError err) ->
+    Left (EnvelopeFrameError err) -> do
       logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed shell frame: " <> err)
     Right envelope -> do
       let payloadBytes = LBS.length (Aeson.encode (envelopeContent envelope))
           mtype = msgType (envelopeHeader envelope)
+      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
+        ("Shell loop: parsed envelope, msg_type=" <> mtype)
       when (payloadBytes > payloadLimitBytes) $
         logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn
           ("Received payload exceeding 1MB (" <> T.pack (show payloadBytes) <> " bytes)")
@@ -175,10 +180,15 @@ shellLoop ctx keyBytes shellSock iopubSock = forever $ do
       -- Route based on message type
       result <- case mtype of
         "kernel_info_request" -> do
+          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: calling handleKernelInfo"
           infoResult <- handleKernelInfo ctx envelope
           case infoResult of
-            Left err -> pure $ Left err
-            Right reply -> pure $ Right [reply]
+            Left err -> do
+              logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogError "Shell loop: handleKernelInfo failed"
+              pure $ Left err
+            Right reply -> do
+              logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: handleKernelInfo succeeded"
+              pure $ Right [reply]
         "execute_request" -> handleExecuteOnce ctx envelope
         _ -> do
           logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn 
@@ -188,11 +198,16 @@ shellLoop ctx keyBytes shellSock iopubSock = forever $ do
       case result of
         Left bridgeErr ->
           logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogError (bridgeErrorMessage bridgeErr)
-        Right envelopes ->
+        Right envelopes -> do
+          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
+            ("Shell loop: sending " <> T.pack (show (length envelopes)) <> " reply envelope(s)")
           for_ (zip [0 :: Int ..] envelopes) $ \(idx, env) -> do
             let rendered = renderEnvelopeFrames keyBytes env
             if idx == 0
-              then sendFrames shellSock rendered
+              then do
+                logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
+                  ("Shell loop: sending reply on shell socket (" <> T.pack (show (length rendered)) <> " frames)")
+                sendFrames shellSock rendered
               else sendIOPub env rendered
   where
     sendIOPub env rendered =
