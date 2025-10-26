@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "{{KERNEL_BIN}}",
+    "--connection",
+    "{connection_file}"
+  ],
+  "display_name": "HsJupyter (GHC)",
+  "language": "haskell",
+  "env": {}
+}

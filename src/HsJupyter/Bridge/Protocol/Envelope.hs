@@ -6,8 +6,12 @@ module HsJupyter.Bridge.Protocol.Envelope
   , ExecuteReply(..)
   , InterruptReply(..)
   , ExecuteStatus(..)
+  , KernelInfoRequest(..)
+  , KernelInfoReply(..)
   , fromExecuteRequest
+  , fromKernelInfoRequest
   , toExecuteReply
+  , toKernelInfoReply
   , emptyMetadata
   ) where
 
@@ -165,3 +169,63 @@ toExecuteReply env reply = env
 -- | Utility for consumers needing empty metadata without re-importing aeson internals.
 emptyMetadata :: Value
 emptyMetadata = Aeson.Object mempty
+
+-- | Kernel info request (empty content, just needs msg_type)
+data KernelInfoRequest = KernelInfoRequest
+  deriving (Eq, Show)
+
+instance FromJSON KernelInfoRequest where
+  parseJSON = withObject "KernelInfoRequest" $ \_ ->
+    pure KernelInfoRequest
+
+instance ToJSON KernelInfoRequest where
+  toJSON KernelInfoRequest = object []
+
+-- | Kernel info reply with kernel metadata
+data KernelInfoReply = KernelInfoReply
+  { kirProtocolVersion :: Text
+  , kirImplementation :: Text
+  , kirImplementationVersion :: Text
+  , kirLanguageInfo :: Value
+  , kirBanner :: Text
+  , kirHelpLinks :: [Value]
+  , kirStatus :: Text
+  } deriving (Eq, Show)
+
+instance ToJSON KernelInfoReply where
+  toJSON reply = object
+    [ "protocol_version" .= kirProtocolVersion reply
+    , "implementation" .= kirImplementation reply
+    , "implementation_version" .= kirImplementationVersion reply
+    , "language_info" .= kirLanguageInfo reply
+    , "banner" .= kirBanner reply
+    , "help_links" .= kirHelpLinks reply
+    , "status" .= kirStatus reply
+    ]
+
+instance FromJSON KernelInfoReply where
+  parseJSON = withObject "KernelInfoReply" $ \obj ->
+    KernelInfoReply
+      <$> obj .: "protocol_version"
+      <*> obj .: "implementation"
+      <*> obj .: "implementation_version"
+      <*> obj .: "language_info"
+      <*> obj .: "banner"
+      <*> obj .: "help_links"
+      <*> obj .: "status"
+
+-- | Helper to convert a general envelope to a kernel_info_request when msg_type matches.
+fromKernelInfoRequest :: ProtocolEnvelope Value -> Maybe (ProtocolEnvelope KernelInfoRequest)
+fromKernelInfoRequest env =
+  if msgType (envelopeHeader env) == "kernel_info_request"
+    then Just env { envelopeContent = KernelInfoRequest }
+    else Nothing
+
+-- | Build a kernel_info_reply envelope from a kernel_info_request.
+toKernelInfoReply :: ProtocolEnvelope KernelInfoRequest -> KernelInfoReply -> ProtocolEnvelope Value
+toKernelInfoReply env reply = env
+  { envelopeContent = toJSON reply
+  , envelopeParent = Just (envelopeHeader env)
+  , envelopeHeader = (envelopeHeader env)
+      { msgType = "kernel_info_reply" }
+  }
