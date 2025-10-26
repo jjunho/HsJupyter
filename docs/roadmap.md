@@ -8,12 +8,14 @@ This living checklist captures the near-term implementation tasks derived from t
 ## Completed ✅
 
 ### Phase 1: Protocol Bridge (001-protocol-bridge)
+
 - [x] Prototype `KernelProcess` and `JupyterBridge` handshake (ZeroMQ message round-trip)
 - [x] HMAC signature validation and message authentication
 - [x] Echo runtime with deterministic streams for validation
 - [x] Protocol envelope parsing and response generation
 
 ### Phase 2: Runtime Core (002-runtime-core)  
+
 - [x] Stand up persistent `RuntimeManager` with streaming stdout/stderr
 - [x] STM-based job queues with cancellation support
 - [x] Resource management with `ResourceGuard` and limits enforcement
@@ -21,6 +23,7 @@ This living checklist captures the near-term implementation tasks derived from t
 - [x] Comprehensive diagnostics and telemetry system
 
 ### Phase 3: GHC Evaluation (003-ghc-evaluation)
+
 - [x] Real Haskell evaluation using hint library integration
 - [x] Persistent interpreter sessions with variable/function persistence
 - [x] Module import system with security policy enforcement
@@ -30,6 +33,7 @@ This living checklist captures the near-term implementation tasks derived from t
 - [x] TMVar-based cancellation with graceful degradation
 
 ### Constitutional Compliance (Constitution v1.2.0)
+
 - [x] Shared error handling patterns (DRY principle implementation)
 - [x] SOLID design principles throughout architecture
 - [x] Comprehensive test coverage (147+ test examples)
@@ -39,6 +43,7 @@ This living checklist captures the near-term implementation tasks derived from t
 ## In Progress 🚧
 
 ### Phase 4: Installation & CLI Infrastructure
+
 - [ ] Design CLI skeleton for `hs-jupyter-kernel install` (argument parsing, connection file handling)
 - [ ] Implement Jupyter kernel installation process and registration
 - [ ] Build `hs-jupyter-kernel doctor` diagnostics CLI for troubleshooting
@@ -46,18 +51,21 @@ This living checklist captures the near-term implementation tasks derived from t
 ## Upcoming 📋
 
 ### Phase 5: Advanced Features
+
 - [ ] Implement artifact caching and environment detection in `EnvironmentService`
 - [ ] Wire completions/diagnostics capability providers behind feature flags
 - [ ] Enhanced module import system with package management integration
 - [ ] Interactive debugging capabilities with GHCi integration
 
 ### Phase 6: Performance & Scalability
+
 - [ ] Author benchmark suite scaffolding (`docs/performance`) and automate runs
 - [ ] Memory usage optimization for long-running sessions
 - [ ] Parallel evaluation support for independent expressions
 - [ ] Performance profiling and optimization tools
 
 ### Phase 7: Documentation & Support
+
 - [ ] Populate installation and configuration guides with real procedures
 - [ ] Draft support knowledge base articles for top installer/runtime issues
 - [ ] Create comprehensive user documentation and tutorials
@@ -66,6 +74,7 @@ This living checklist captures the near-term implementation tasks derived from t
 ## Implementation Status 📊
 
 ### Current Capabilities ✅
+
 - **Functional Haskell REPL**: Complete GHC evaluation with persistent sessions
 - **Protocol Compliance**: Full Jupyter kernel protocol implementation
 - **Resource Management**: Memory limits, timeouts, cancellation support
@@ -74,6 +83,7 @@ This living checklist captures the near-term implementation tasks derived from t
 - **Constitutional Compliance**: 96/100 score with exemplary code quality
 
 ### Key Metrics
+
 - **Total Tasks Completed**: 56/56 (T001-T056) across all phases
 - **Test Coverage**: 147+ test examples with comprehensive validation
 - **Build Performance**: <5 seconds with optimized compilation
@@ -93,6 +103,7 @@ This living checklist captures the near-term implementation tasks derived from t
 ## Recent Achievements (Latest Release) 🎉
 
 ### v0.1.0 - GHC Evaluation Complete
+
 - **Phase 3 Implementation**: Full Haskell evaluation with hint library integration
 - **Advanced Error Handling**: 5 syntax error types with smart suggestions
 - **Performance Management**: Differentiated timeouts and resource monitoring
@@ -100,6 +111,7 @@ This living checklist captures the near-term implementation tasks derived from t
 - **Comprehensive Testing**: All core functionality validated and production-ready
 
 ### Technical Highlights
+
 - **704 lines** of sophisticated performance management code
 - **TMVar-based cancellation** with graceful degradation
 - **ResourceGuard integration** with violation handling

@@ -17,6 +17,7 @@ common project-settings
 
   build-depends:
     , aeson                 >=2.0
+    , aeson-pretty
     , async
     , base                  >=4.14 && <5
     , bytestring
@@ -25,9 +26,13 @@ common project-settings
     , cryptonite
     , directory
     , filepath
+    , optparse-applicative  >=0.16
+    , process
+    , unix
     , zeromq4-haskell
     , ghc
     , hint
+
     , mtl
     , random
     , stm
@@ -37,28 +42,34 @@ common project-settings
     , transformers
     , unordered-containers
     , uuid
+    , vector
 
 library
   import:             project-settings
-  exposed-modules:
-    HsJupyter.Bridge.HeartbeatThread
-    HsJupyter.Bridge.JupyterBridge
-    HsJupyter.Bridge.Protocol.Codec
-    HsJupyter.Bridge.Protocol.Envelope
-    HsJupyter.Kernel.Types
-    HsJupyter.KernelProcess
-    HsJupyter.Router.RequestRouter
-    HsJupyter.Runtime.Diagnostics
-    HsJupyter.Runtime.EchoRuntime
-    HsJupyter.Runtime.ErrorHandling
-    HsJupyter.Runtime.Evaluation
-    HsJupyter.Runtime.GHCDiagnostics
-    HsJupyter.Runtime.GHCRuntime
-    HsJupyter.Runtime.GHCSession
-    HsJupyter.Runtime.Manager
-    HsJupyter.Runtime.ResourceGuard
-    HsJupyter.Runtime.SessionState
-    HsJupyter.Runtime.Telemetry
+  exposed-modules:     HsJupyter.KernelProcess
+                     , HsJupyter.Bridge.JupyterBridge
+                     , HsJupyter.Bridge.HeartbeatThread
+                     , HsJupyter.Bridge.Protocol.Codec
+                     , HsJupyter.Bridge.Protocol.Envelope
+                     , HsJupyter.Kernel.Types
+                     , HsJupyter.Router.RequestRouter
+                     , HsJupyter.Runtime.Manager
+                     , HsJupyter.Runtime.EchoRuntime
+                     , HsJupyter.Runtime.GHCRuntime
+                     , HsJupyter.Runtime.GHCSession
+                     , HsJupyter.Runtime.SessionState
+                     , HsJupyter.Runtime.Evaluation
+                     , HsJupyter.Runtime.Diagnostics
+                     , HsJupyter.Runtime.ErrorHandling
+                     , HsJupyter.Runtime.GHCDiagnostics
+                     , HsJupyter.Runtime.ResourceGuard
+                     , HsJupyter.Runtime.Telemetry
+                     , HsJupyter.CLI.Commands
+                     , HsJupyter.CLI.Doctor
+                     , HsJupyter.CLI.Install
+                     , HsJupyter.CLI.Output
+                     , HsJupyter.CLI.Types
+                     , HsJupyter.CLI.Utilities
 
   hs-source-dirs:     src
   other-modules:
@@ -90,17 +101,24 @@ test-suite unit
   hs-source-dirs: test/unit
   main-is:        Spec.hs
   other-modules:
+    CLICommandsSpec
+    CLIInstallSpec
+    CLITypesSpec
+    CrossPlatformSpec
     DiagnosticsSpec
+    DoctorSpec
     ErrorHandlingSpec
     GHCDiagnosticsSpec
     GHCRuntimeSpec
     GHCSessionSpec
     ObservabilitySpec
+    PerformanceSpec
     ProtocolEnvelopeSpec
     ResourceGuardSpec
     RuntimeManagerSpec
     SessionStateSpec
     SignatureValidationSpec
+    SystemIntegrationSpec
     TelemetrySpec
   ghc-options:
     -rtsopts
@@ -109,9 +127,12 @@ test-suite unit
   build-depends:
     , aeson
     , bytestring
+    , clock
+    , deepseq
     , hs-jupyter-kernel
     , hspec                 >=2.10
     , hspec-core
+    , QuickCheck
     , text
     , time
     , unordered-containers
@@ -123,17 +144,23 @@ test-suite integration
   hs-source-dirs: test/integration
   main-is:        Spec.hs
   other-modules:
+    CLIIntegrationSpec
     ExecuteEchoSpec
     GHCNotebookSpec
     RuntimeNotebookSpec
+    JSONOutputIntegrationSpec
   default-extensions: OverloadedStrings
   build-depends:
     , aeson
     , async
     , bytestring
+    , directory
+    , filepath
     , hs-jupyter-kernel
     , hspec              >=2.10
+    , HUnit
     , network
+    , temporary
     , text
     , time
     , zeromq4-haskell

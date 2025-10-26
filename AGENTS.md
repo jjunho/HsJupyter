@@ -33,6 +33,8 @@ Write commit subjects in the imperative mood (`Add runtime manager sketch`) and 
 Codex agents must follow the Specify toolkit prompts before running `/speckit` commands: review the matching files in `.codex/prompts/` (`speckit.specify.md`, `speckit.plan.md`, `speckit.tasks.md`, `speckit.implement.md`) and apply their checklists verbatim. Always invoke the helper scripts under `.specify/scripts/bash/` from the repo root with the documented flags, keep feature branches numbered (`001-name`), and update generated checklists when validation status changes.
 
 ## Active Technologies
+- Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
+- filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
 
 - Haskell with GHC 9.12.2 via ghcup + hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm (003-ghc-evaluation)
 - In-memory interpreter state (hint InterpreterT monad) (003-ghc-evaluation)
