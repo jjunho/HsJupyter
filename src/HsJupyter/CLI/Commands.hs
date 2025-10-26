@@ -18,6 +18,7 @@ import Options.Applicative
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
   , ValidationLevel(..)
+  , ResourceLimits(..)
   )
 
 -- | Global CLI options available for all commands
@@ -35,7 +36,7 @@ defaultGlobalOptions = GlobalOptions
   , goVerbose = False        -- Standard logging level
   }
 
--- | Installation command options
+-- | Installation command options supporting Phase 5 custom configuration
 data InstallOptions = InstallOptions
   { ioScope            :: InstallScope     -- ^ Installation scope (user/system/auto)
   , ioForceReinstall   :: Bool             -- ^ Force overwrite existing installation
@@ -44,6 +45,13 @@ data InstallOptions = InstallOptions
   , ioGHCPath          :: Maybe FilePath   -- ^ Custom GHC executable path
   , ioJupyterDir       :: Maybe FilePath   -- ^ Custom Jupyter directory
   , ioKernelspecDir    :: Maybe FilePath   -- ^ Custom kernelspec directory
+  -- Phase 5 US3 extensions: Custom configuration support
+  , ioConfigFile       :: Maybe FilePath   -- ^ Custom configuration file path
+  , ioLanguage         :: Maybe Text       -- ^ Custom kernel language identifier
+  , ioEnvironmentVars  :: [(Text, Text)]   -- ^ Additional environment variables
+  , ioKernelArguments  :: [Text]           -- ^ Additional kernel startup arguments
+  , ioResourceLimits   :: Maybe ResourceLimits -- ^ Custom resource limits
+  , ioConnectionTimeout :: Maybe Int       -- ^ Custom connection timeout (seconds)
   } deriving (Show, Eq)
 
 -- | Default installation options following constitutional KISS principle
@@ -56,6 +64,13 @@ defaultInstallOptions = InstallOptions
   , ioGHCPath = Nothing               -- Auto-detect GHC
   , ioJupyterDir = Nothing            -- Use standard Jupyter directories
   , ioKernelspecDir = Nothing         -- Use standard kernelspec directories
+  -- Phase 5 US3 defaults: Safe, minimal configuration
+  , ioConfigFile = Nothing            -- Use default config discovery
+  , ioLanguage = Nothing              -- Use default "haskell" language
+  , ioEnvironmentVars = []            -- No additional environment variables
+  , ioKernelArguments = []            -- No additional kernel arguments
+  , ioResourceLimits = Nothing        -- Use system defaults
+  , ioConnectionTimeout = Nothing     -- Use Jupyter default timeout
   }
 
 -- | Top-level CLI commands
@@ -109,7 +124,7 @@ globalOptionsParser = GlobalOptions
   <*> switch (long "quiet" <> help "Suppress non-essential output")
   <*> switch (long "verbose" <> help "Enable detailed logging")
 
--- | Installation options parser
+-- | Installation options parser with Phase 5 US3 extensions
 installOptionsParser :: Parser InstallOptions
 installOptionsParser = InstallOptions
   <$> installScopeParser
@@ -119,6 +134,13 @@ installOptionsParser = InstallOptions
   <*> optional (strOption (long "ghc-path" <> metavar "PATH" <> help "Custom GHC executable path"))
   <*> optional (strOption (long "jupyter-dir" <> metavar "DIR" <> help "Custom Jupyter directory"))
   <*> optional (strOption (long "kernelspec-dir" <> metavar "DIR" <> help "Custom kernelspec directory"))
+  -- Phase 5 US3 custom configuration options
+  <*> optional (strOption (long "config" <> metavar "FILE" <> help "Custom configuration file"))
+  <*> optional (strOption (long "language" <> metavar "LANG" <> help "Custom kernel language identifier"))
+  <*> environmentVarsParser
+  <*> kernelArgumentsParser
+  <*> resourceLimitsParser
+  <*> optional (option auto (long "timeout" <> metavar "SECONDS" <> help "Connection timeout in seconds"))
 
 -- | Installation scope parser
 installScopeParser :: Parser InstallScope
@@ -138,6 +160,30 @@ validationLevelReader = eitherReader $ \case
   "basic" -> Right BasicValidation
   "full" -> Right FullValidation
   invalid -> Left $ "Invalid validation level: " ++ invalid
+
+-- | Environment variables parser (Phase 5 US3)
+environmentVarsParser :: Parser [(Text, Text)]
+environmentVarsParser = many $ option envVarReader $
+  long "env" <> metavar "KEY=VALUE" <> help "Additional environment variable (can be specified multiple times)"
+
+-- | Environment variable reader
+envVarReader :: ReadM (Text, Text)
+envVarReader = eitherReader $ \s ->
+  case T.breakOn "=" (T.pack s) of
+    (key, value) | not (T.null value) -> Right (key, T.drop 1 value)
+    _ -> Left $ "Invalid environment variable format. Expected KEY=VALUE, got: " ++ s
+
+-- | Kernel arguments parser (Phase 5 US3)
+kernelArgumentsParser :: Parser [Text]
+kernelArgumentsParser = many $ strOption $
+  long "kernel-arg" <> metavar "ARG" <> help "Additional kernel startup argument (can be specified multiple times)"
+
+-- | Resource limits parser (Phase 5 US3)
+resourceLimitsParser :: Parser (Maybe ResourceLimits)
+resourceLimitsParser = optional $ ResourceLimits
+  <$> optional (option auto (long "memory-limit" <> metavar "MB" <> help "Memory limit in MB"))
+  <*> optional (option auto (long "exec-timeout" <> metavar "SECONDS" <> help "Execution timeout in seconds"))
+  <*> optional (option auto (long "output-limit" <> metavar "KB" <> help "Maximum output size in KB"))
 
 -- | Help text for CLI
 cmdHelp :: InfoMod a

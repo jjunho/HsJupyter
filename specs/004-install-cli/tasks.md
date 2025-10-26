@@ -122,13 +122,13 @@ Each user story must be independently testable:
 
 ### Configuration Extensions
 
-- [ ] T031 [US3] Extend InstallOptions with custom path and configuration support in src/HsJupyter/CLI/Commands.hs
-- [ ] T032 [P] [US3] Implement custom path validation and resolution in src/HsJupyter/CLI/Config.hs
-- [ ] T033 [P] [US3] Extend kernel.json generation with custom configuration options in src/HsJupyter/CLI/Install.hs
+- [x] T031 [US3] Extend InstallOptions with custom path and configuration support in src/HsJupyter/CLI/Commands.hs
+- [x] T032 [P] [US3] Implement custom path validation and resolution in src/HsJupyter/CLI/Configuration.hs
+- [x] T033 [P] [US3] Extend kernel.json generation with custom configuration options in src/HsJupyter/CLI/Install.hs
 
 ### US3 Testing
 
-- [ ] T034 [P] [US3] Create integration tests for custom configuration scenarios in test/integration/CLIIntegrationSpec.hs
+- [x] T034 [P] [US3] Create integration tests for custom configuration scenarios in test/integration/CLIIntegrationSpec.hs
 
 ---
 

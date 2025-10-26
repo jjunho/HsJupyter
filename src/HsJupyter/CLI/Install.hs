@@ -113,6 +113,7 @@ import HsJupyter.CLI.Types
   , JupyterEnvironment(..)
   , PythonEnvironment(..)
   , ValidationLevel(..)
+  , ResourceLimits(..)
   )
 import HsJupyter.CLI.Commands (InstallOptions(..))
 import qualified HsJupyter.CLI.Utilities as Utilities
@@ -579,7 +580,7 @@ validateKernelInstallation kernelspecDir kernelName = do
 -- T017: Kernel.json Generation with Constitutional Compliance
 -- ===========================================================================
 
--- | Generate kernel.json content for HsJupyter kernel installation (T017)
+-- | Generate kernel.json content for HsJupyter kernel installation (T017 + T033: Phase 5 US3)
 generateKernelJson :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Value)
 generateKernelJson options ghcPath = do
   -- Constitutional validation: validate inputs
@@ -591,18 +592,18 @@ generateKernelJson options ghcPath = do
       case kernelExecutablePath of
         Left diag -> return $ Left diag
         Right executablePath -> do
-          -- Build kernel.json structure following Jupyter specification
-          let kernelJson = object
-                [ "argv" .= generateKernelArgv executablePath
+          -- Build enhanced kernel.json structure with Phase 5 US3 custom configuration support
+          let kernelJson = object $
+                [ "argv" .= generateKernelArgvWithCustomArgs options executablePath
                 , "display_name" .= getDisplayName options
-                , "language" .= ("haskell" :: Text)
+                , "language" .= getLanguageIdentifier options
                 , "interrupt_mode" .= ("signal" :: Text)
-                , "env" .= generateEnvironmentVariables options ghcPath
-                , "metadata" .= generateKernelMetadata options
-                ]
+                , "env" .= generateEnvironmentVariablesWithCustom options ghcPath
+                , "metadata" .= generateKernelMetadataWithCustom options
+                ] ++ generateResourceLimitFields options
           return $ Right kernelJson
 
--- | Generate argv array for kernel startup command (T017)
+-- | Generate argv array for kernel startup command (T017 + T033: Phase 5 US3)
 generateKernelArgv :: FilePath -> [Text]
 generateKernelArgv executablePath =
   [ T.pack executablePath
@@ -610,14 +611,37 @@ generateKernelArgv executablePath =
   , "{connection_file}"  -- Jupyter will substitute this placeholder
   ]
 
+-- | Generate argv array with custom kernel arguments (T033: Phase 5 US3)
+generateKernelArgvWithCustomArgs :: InstallOptions -> FilePath -> [Text]
+generateKernelArgvWithCustomArgs options executablePath =
+  let baseArgs = generateKernelArgv executablePath
+      customArgs = ioKernelArguments options
+      -- Add custom timeout if specified
+      timeoutArgs = case ioConnectionTimeout options of
+        Nothing -> []
+        Just timeout -> ["--timeout", T.pack (show timeout)]
+  in baseArgs ++ customArgs ++ timeoutArgs
+
 -- | Get display name for the kernel from options or default (T017)
 getDisplayName :: InstallOptions -> Text
 getDisplayName options = fromMaybe "Haskell" (ioDisplayName options)
+
+-- | Get language identifier for the kernel with custom support (T033: Phase 5 US3)
+getLanguageIdentifier :: InstallOptions -> Text
+getLanguageIdentifier options = fromMaybe "haskell" (ioLanguage options)
 
 -- | Generate environment variables for kernel execution (T017)
 generateEnvironmentVariables :: InstallOptions -> FilePath -> Object
 generateEnvironmentVariables _options ghcPath = 
   KM.fromList [(K.fromText "GHC_PATH", String $ T.pack ghcPath)]
+
+-- | Generate environment variables with custom additions (T033: Phase 5 US3)
+generateEnvironmentVariablesWithCustom :: InstallOptions -> FilePath -> Object
+generateEnvironmentVariablesWithCustom options ghcPath = 
+  let baseEnv = generateEnvironmentVariables options ghcPath
+      customEnvPairs = ioEnvironmentVars options
+      customEnvMap = KM.fromList [(K.fromText key, String value) | (key, value) <- customEnvPairs]
+  in KM.union customEnvMap baseEnv  -- Custom vars override base vars
 
 -- | Generate kernel metadata with constitutional compliance (T017)
 generateKernelMetadata :: InstallOptions -> Object
@@ -634,6 +658,17 @@ generateKernelMetadata _options = KM.fromList
           ]
       ])
   ]
+
+-- | Generate kernel metadata with custom configuration (T033: Phase 5 US3)
+generateKernelMetadataWithCustom :: InstallOptions -> Object
+generateKernelMetadataWithCustom options = 
+  let baseMetadata = generateKernelMetadata options
+      customFields = case ioResourceLimits options of
+        Nothing -> []
+        Just limits -> 
+          [ (K.fromText "resource_limits", resourceLimitsToMetadata limits)
+          ]
+  in KM.union (KM.fromList customFields) baseMetadata
 
 -- | Get the path to the hs-jupyter-kernel executable (T017)
 getKernelExecutablePath :: IO (Either CLIDiagnostic FilePath)
@@ -1064,6 +1099,28 @@ extractKernelExecutablePath kernelJson = do
             _ -> return Nothing
         _ -> return Nothing
     _ -> return Nothing
+
+-- | Convert resource limits to metadata JSON (T033: Phase 5 US3)
+resourceLimitsToMetadata :: HsJupyter.CLI.Types.ResourceLimits -> Value
+resourceLimitsToMetadata limits = object $
+  [ ("type", String "resource_limits") ] ++
+  (case rlMemoryLimitMB limits of
+    Nothing -> []
+    Just memLimit -> [("memory_limit_mb", Number $ fromIntegral memLimit)]) ++
+  (case rlTimeoutSeconds limits of
+    Nothing -> []
+    Just timeout -> [("timeout_seconds", Number $ fromIntegral timeout)]) ++
+  (case rlMaxOutputSizeKB limits of
+    Nothing -> []
+    Just outputLimit -> [("max_output_size_kb", Number $ fromIntegral outputLimit)])
+
+-- | Generate resource limit fields for kernel.json root level (T033: Phase 5 US3)
+generateResourceLimitFields :: InstallOptions -> [(K.Key, Value)]
+generateResourceLimitFields options = case ioResourceLimits options of
+  Nothing -> []
+  Just limits -> case rlTimeoutSeconds limits of
+    Nothing -> []
+    Just timeout -> [(K.fromText "startup_timeout", Number $ fromIntegral timeout)]
 
 -- | Validate environment configuration completeness (T024)
 validateEnvironmentConfiguration :: Value -> IO (Either CLIDiagnostic ())
