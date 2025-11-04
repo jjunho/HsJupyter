@@ -9,6 +9,7 @@ import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (async, cancel, link)
 import           Control.Exception (bracket, displayException, try)
 import           Control.Monad (forever, unless, when)
+import           Control.Monad.IO.Class (liftIO)
 import           Data.Aeson (eitherDecodeFileStrict')
 import           Data.Int (Int64)
 import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -29,7 +30,8 @@ import qualified System.ZMQ4 as Z
 import           Katip
 
 import           HsJupyter.Bridge.JupyterBridge
-import           HsJupyter.Bridge.Protocol.Codec
+import           HsJupyter.Bridge.Protocol.Codec (EnvelopeFrameError(..), parseEnvelopeFrames, renderEnvelopeFrames)
+import           HsJupyter.Bridge.Protocol.Signature (verifySignature)
 import           HsJupyter.Bridge.Protocol.Envelope
 import           HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
 import           HsJupyter.Kernel.Types
@@ -94,7 +96,7 @@ withKernel cfg action = do
         configureSocket heartbeat
         bindAll shell control stdinSock iopub heartbeat
         bridgeCtx <- mkBridgeContext cfg manager
-        runKatipT (getLogEnv bridgeCtx) $
+        runKatipContextT (logEnv bridgeCtx) () "kernel" $
           logFM InfoS "Kernel sockets bound"
         now <- getCurrentTime
         lastBeatRef <- newIORef now
@@ -132,7 +134,7 @@ runKernel cfg = withKernel cfg (forever (threadDelay 1000000))
 -- Internal loops ------------------------------------------------------------
 
 shellLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> Z.Socket Z.Pub -> IORef Bool -> IO ()
-shellLoop ctx keyBytes shellSock iopubSock shutdownRef = forever $ runKatipT (getLogEnv ctx) $ do
+shellLoop ctx keyBytes shellSock iopubSock _shutdownRef = forever $ runKatipContextT (logEnv ctx) () "shell" $ do
   logFM InfoS "Shell loop: waiting for message..."
   frames <- liftIO $ Z.receiveMulti shellSock
   logFM DebugS $ logStr $ "Shell loop: received " <> show (length frames) <> " frames"
@@ -145,36 +147,13 @@ shellLoop ctx keyBytes shellSock iopubSock shutdownRef = forever $ runKatipT (ge
       logFM InfoS $ logStr $ "Shell loop: parsed envelope, msg_type=" <> T.unpack mtype
       
       -- Route based on message type
-      result <- case mtype of
-        "kernel_info_request" ->
-          liftIO (handleKernelInfo ctx envelope) >>= \case
-            Left err -> do
-              logFM ErrorS "Shell loop: handleKernelInfo failed"
-              return $ Left err
-            Right reply -> return $ Right [reply]
-        "execute_request" -> do
-          valid <- liftIO $ verifySignature keyBytes envelope
-          unless valid $
-            logFM WarningS "Rejected envelope with invalid signature"
-          if not valid
-            then return $ Left SignatureValidationFailed
-            else case fromExecuteRequest envelope of
-              Nothing -> do
-                logFM WarningS "Failed to decode execute_request"
-                return $ Left (DecodeFailure "Unsupported content type")
-              Just typed -> do
-                let busyEnv = statusEnvelope typed "busy"
-                    busyFrames = renderEnvelopeFrames keyBytes busyEnv
-                liftIO $ sendIOPub busyEnv busyFrames
-                envelopes <- liftIO $ handleExecuteOnce ctx typed
-                return (Right envelopes)
-        "shutdown_request" -> do
-            liftIO $ writeIORef shutdownRef True
-            -- TODO: Handle shutdown reply
-            return $ Right []
-        _ -> do
-          logFM WarningS $ logStr $ "Unsupported message type on shell: " <> T.unpack mtype
-          return $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
+      let valid = verifySignature keyBytes envelope
+      unless valid $
+        logFM WarningS "Rejected envelope with invalid signature"
+      
+      result <- if not valid
+        then return $ Left SignatureValidationFailed
+        else liftIO $ handleRequest ctx (bridgeManager ctx) envelope
       
       case result of
         Left bridgeErr ->
@@ -197,7 +176,7 @@ payloadLimitBytes :: Int64
 payloadLimitBytes = 1024 * 1024
 
 controlLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> IORef Bool -> IO ()
-controlLoop ctx keyBytes controlSock shutdownRef = forever $ runKatipT (getLogEnv ctx) $ do
+controlLoop ctx _keyBytes controlSock shutdownRef = forever $ runKatipContextT (logEnv ctx) () "control" $ do
   frames <- liftIO $ Z.receiveMulti controlSock
   case parseEnvelopeFrames frames of
     Left (EnvelopeFrameError err) ->
@@ -216,7 +195,7 @@ heartbeatLoop heartbeatSock lastBeatRef = forever $ do
   writeIORef lastBeatRef now
 
 heartbeatMonitorLoop :: BridgeContext -> IORef UTCTime -> IORef HeartbeatStatus -> IO ()
-heartbeatMonitorLoop ctx lastBeatRef statusRef = forever $ runKatipT (getLogEnv ctx) $ do
+heartbeatMonitorLoop ctx lastBeatRef statusRef = forever $ runKatipContextT (logEnv ctx) () "heartbeat-monitor" $ do
   liftIO $ threadDelay heartbeatPollInterval
   lastBeat <- liftIO $ readIORef lastBeatRef
   now <- liftIO getCurrentTime

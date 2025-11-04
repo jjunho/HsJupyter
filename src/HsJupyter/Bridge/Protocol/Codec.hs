@@ -8,8 +8,7 @@ module HsJupyter.Bridge.Protocol.Codec
   , renderEnvelopeFrames
   ) where
 
-import           Crypto.Hash (Digest, SHA256)
-import           Crypto.MAC.HMAC (HMAC, hmac, hmacGetDigest)
+
 import           Data.Aeson (Value, (.=))
 import qualified Data.Aeson as Aeson
 import           Data.Bifunctor (first)
@@ -18,30 +17,12 @@ import qualified Data.ByteString.Base64 as B64
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import           Control.Monad (when)
+
 import           HsJupyter.Bridge.Protocol.Envelope
-import           Katip
+import           HsJupyter.Bridge.Protocol.Signature (computeSignature, verifySignature)
 
--- | Compute a deterministic HMAC-SHA256 signature for the envelope frames.
-computeSignature :: BS.ByteString -> SignaturePayload -> Text
-computeSignature key payload
-  | BS.null key = ""
-  | otherwise   =
-      let frames = payloadFrames payload
-          digest :: Digest SHA256
-          digest = hmacGetDigest (hmac key (BS.concat frames) :: HMAC SHA256)
-      in T.pack (show digest)
 
--- | Verify the provided signature matches the recomputed value.
-verifySignature :: KatipContext m => BS.ByteString -> ProtocolEnvelope Value -> m Bool
-verifySignature key env =
-  if BS.null key
-    then return True
-    else do
-      let expected = computeSignature key (envelopeSignaturePayload env)
-          actual   = envelopeSignature env
-      when (expected /= actual) $
-        logFM ErrorS $ logStr $ "Signature mismatch: expected " <> T.unpack expected <> ", got " <> T.unpack actual
-      return $ expected == actual
 
 -- | Encode an envelope for logging or transmission (without ZeroMQ framing).
 encodeEnvelope :: ProtocolEnvelope Value -> Value

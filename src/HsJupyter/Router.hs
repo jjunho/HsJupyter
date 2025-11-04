@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module HsJupyter.Router.RequestRouter
+module HsJupyter.Router
   ( routeRequest
   ) where
 
@@ -10,16 +10,24 @@ import           Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Katip as K
 
-
-import           HsJupyter.Bridge.JupyterBridge (BridgeError (..))
-import           HsJupyter.Bridge.Protocol.Envelope
+import           HsJupyter.Bridge.Types (BridgeError (..))
+import           HsJupyter.Bridge.Protocol.Envelope (ExecuteReply (..),
+                                                  ExecuteRequest (..),
+                                                  InterruptReply (..),
+                                                  KernelInfoReply (..),
+                                                  LanguageInfo (..),
+                                                  ProtocolEnvelope (..),
+                                                  MessageHeader (..),
+                                                  ShutdownReply (..),
+                                                  ShutdownRequest (..))
 import           HsJupyter.Runtime.Manager (RuntimeManager)
 import qualified HsJupyter.Runtime.Manager as RM
 import           HsJupyter.Runtime.SessionState
 
 -- | Main entry point for routing messages from the shell and control channels.
-routeRequest :: (KatipContext m)
+routeRequest :: (K.KatipContext m)
              => RuntimeManager
              -> ProtocolEnvelope Value
              -> m (Either BridgeError [ProtocolEnvelope Value])
@@ -33,7 +41,7 @@ routeRequest manager envelope =
        "shutdown_request"    -> liftIO $ Right . (:[]) <$> handleShutdown manager envelope
        _                     -> return $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
 
-handleKernelInfo :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope KernelInfoReply)
+handleKernelInfo :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
 handleKernelInfo _ envelope = do
   -- In a real implementation, this would query the GHC version, etc.
   let reply = KernelInfoReply
@@ -48,9 +56,9 @@ handleKernelInfo _ envelope = do
         , implementationVersion = "0.1.0" -- TODO: Get from Cabal
         , banner = "HsJupyter - A Haskell kernel for Jupyter"
         }
-  return $ replyEnvelope envelope "kernel_info_reply" reply
+  return $ replyEnvelope envelope "kernel_info_reply" (Aeson.toJSON reply)
 
-handleExecuteRequest :: (KatipContext m)
+handleExecuteRequest :: (K.KatipContext m)
                      => RuntimeManager
                      -> ProtocolEnvelope Value
                      -> m (Either BridgeError [ProtocolEnvelope Value])
@@ -79,24 +87,25 @@ handleExecuteRequest manager envelope =
             { erStatus = "ok"
             , erExecutionCount = -1 -- The runtime will send the real count
             , erPayload = []
-            , erUserExpressions = Aeson.object []
+            , erReplyUserExpressions = Aeson.object []
             }
-      return $ Right [replyEnvelope envelope "execute_reply" reply]
+      return $ Right [replyEnvelope envelope "execute_reply" (Aeson.toJSON reply)]
 
-handleInterrupt :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope InterruptReply)
+handleInterrupt :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
 handleInterrupt manager envelope = do
   RM.enqueueInterrupt manager (msgId (envelopeHeader envelope))
-  return $ replyEnvelope envelope "interrupt_reply" (InterruptReply "ok")
+  return $ replyEnvelope envelope "interrupt_reply" (Aeson.toJSON $ InterruptReply "ok")
 
-handleShutdown :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope ShutdownReply)
-handleShutdown manager envelope =
+handleShutdown :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
+handleShutdown _manager envelope =
   case Aeson.fromJSON (envelopeContent envelope) of
     Aeson.Error _ ->
       -- This shouldn't happen for a valid shutdown request
-      return $ replyEnvelope envelope "shutdown_reply" (ShutdownReply False)
-    Aeson.Success (req :: ShutdownRequest) -> do
-      RM.enqueueShutdown manager (srRestart req)
-      return $ replyEnvelope envelope "shutdown_reply" (ShutdownReply (srRestart req))
+      return $ replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply False)
+    Aeson.Success (ShutdownRequest restart) -> do
+      -- TODO: Implement actual shutdown logic in RuntimeManager
+      -- RM.enqueueShutdown manager restart
+      return $ replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply restart)
 
 -- | Helper to create a reply envelope.
 replyEnvelope :: (Aeson.ToJSON a)
@@ -107,15 +116,12 @@ replyEnvelope :: (Aeson.ToJSON a)
 replyEnvelope reqEnv newMsgType content =
   let reqHdr = envelopeHeader reqEnv
       newHdr = MessageHeader
-        { identifiers = []
-        , parentHeader = Just reqHdr
-        , metadata = Aeson.object []
-        , msgId = "reply-" <> msgId reqHdr -- TODO: Generate proper UUID
+        { msgId = "reply-" <> msgId reqHdr -- TODO: Generate proper UUID
+        , msgType = newMsgType
         , session = session reqHdr
         , username = username reqHdr
-        , date = date reqHdr -- TODO: Update timestamp
-        , msgType = newMsgType
         , version = version reqHdr
+        , date = date reqHdr -- TODO: Update timestamp
         }
   in ProtocolEnvelope
        { envelopeIdentities = envelopeIdentities reqEnv
