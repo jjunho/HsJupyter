@@ -34,7 +34,12 @@ spec = do
       case fromExecuteRequest env of
         Nothing -> expectationFailure "could not decode execute_request"
         Just typed -> do
-          let reply = ExecuteReply 1 ExecuteOk []
+          let reply = ExecuteReply
+                { erStatus = "ok"
+                , erExecutionCount = 1
+                , erPayload = []
+                , erReplyUserExpressions = object []
+                }
               out = toExecuteReply typed reply
           envelopeIdentities out `shouldBe` envelopeIdentities env
           msgType (envelopeHeader out) `shouldBe` T.pack "execute_reply"
