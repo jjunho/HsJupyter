@@ -17,9 +17,11 @@ common project-settings
 
   build-depends:
     , aeson                 >=2.0
+    , aeson-casing
     , aeson-pretty
     , async
     , base                  >=4.14 && <5
+    , base64-bytestring
     , bytestring
     , containers
     , exceptions

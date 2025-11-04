@@ -31,20 +31,8 @@ module HsJupyter.CLI.Doctor
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad (filterM, when)
-import Control.Exception (try, IOException, SomeException, catch)
-import System.Directory 
-  ( doesDirectoryExist
-  , doesFileExist
-  , getPermissions
-  , writable
-  , readable
-  )
-import System.FilePath ((</>))
-import System.Environment (lookupEnv)
-import Data.Aeson (Value(..), ToJSON(..), (.=), object)
+import Data.Aeson (ToJSON(..), (.=), object)
 import qualified Data.Aeson as A
-import Data.Maybe (fromMaybe, isJust, catMaybes)
 import Data.Time.Clock (getCurrentTime, UTCTime)
 
 -- Constitutional integration
@@ -54,14 +42,12 @@ import HsJupyter.Runtime.ResourceGuard
   , defaultResourceLimits
   , ResourceLimits(..)
   )
-import HsJupyter.Runtime.Telemetry (RuntimeMetric(..), emitMetric)
 
 -- CLI Types integration
 import HsJupyter.CLI.Types 
   ( CLIDiagnostic(..)
   , DiagnosticResult(..)
   , JupyterEnvironment(..)
-  , PythonEnvironment(..)
   , JupyterStatus(..)
   , KernelStatus(..)
   , HealthStatus(..)
@@ -74,7 +60,6 @@ import HsJupyter.CLI.Types
   )
 import HsJupyter.CLI.Commands (GlobalOptions(..))
 import HsJupyter.CLI.Install (detectJupyterEnvironment, logCLIOperation)
-import qualified HsJupyter.CLI.Utilities as Utilities
 
 -- ===========================================================================
 -- T025: DiagnosticResult Data Model and Analysis Logic
@@ -203,7 +188,7 @@ executeDiagnostics globalOpts = withErrorContext "system-diagnostics" $ do
         , rcMaxOutputBytes = 1048576 -- 1MB output limit for diagnostic reports
         }
   
-  result <- withResourceGuard diagnosticsLimits $ \guard -> do
+  result <- withResourceGuard diagnosticsLimits $ \_ -> do
     analysisResult <- performSystemHealthCheck StandardAnalysis
     case analysisResult of
       Left diag -> return $ Left diag
@@ -347,7 +332,7 @@ analyzeDiagnosticResult analysis = do
 
 -- | Check Jupyter component health and status
 checkJupyterComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
-checkJupyterComponent depth checkTime = do
+checkJupyterComponent _depth checkTime = do
   -- Use existing Jupyter detection logic
   jupyterEnvResult <- detectJupyterEnvironment
   case jupyterEnvResult of
@@ -384,7 +369,7 @@ checkJupyterComponent depth checkTime = do
 
 -- | Check HsJupyter kernel component health
 checkKernelComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
-checkKernelComponent depth checkTime = do
+checkKernelComponent _depth checkTime = do
   -- TODO: Implement kernel detection logic
   -- For now, return placeholder status
   let status = ComponentStatus
@@ -452,7 +437,7 @@ checkGHCComponent depth checkTime = do
 
 -- | Check system environment component
 checkSystemComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
-checkSystemComponent depth checkTime = do
+checkSystemComponent _depth checkTime = do
   -- Gather system information
   systemInfo <- gatherSystemInformation
   let systemIssues = validateSystemEnvironment systemInfo
@@ -596,11 +581,11 @@ analyzeSystemHealth = executeDiagnostics
 
 -- | Generate diagnostic report (public API for CLI integration)
 generateDiagnosticReport :: GlobalOptions -> FilePath -> IO (Either CLIDiagnostic ())
-generateDiagnosticReport globalOpts reportPath = do
+generateDiagnosticReport globalOpts _reportPath = do
   diagnosticResult <- executeDiagnostics globalOpts
   case diagnosticResult of
     Left diag -> return $ Left diag
-    Right result -> do
+    Right _result -> do
       -- TODO: Write diagnostic report to file
       return $ Right ()
 

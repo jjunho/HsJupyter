@@ -14,6 +14,8 @@ module HsJupyter.Runtime.GHCSession
   , listBindings
   , addImportedModule
   , listImportedModules
+  , recordDeclaration
+  , listDeclarations
   , extractBindingNames
     
     -- * Import policy checking
@@ -27,13 +29,11 @@ module HsJupyter.Runtime.GHCSession
   ) where
 
 import Control.Concurrent.STM
-import Control.Monad.IO.Class
 import Data.List (isPrefixOf, isInfixOf)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter)
 
 import HsJupyter.Runtime.SessionState (ResourceBudget)
 
@@ -47,6 +47,7 @@ data GHCSessionState = GHCSessionState
   , importedModules :: TVar [String]           -- List of successfully imported modules (ModuleName later)
   , sessionConfig :: GHCConfig                 -- Configuration including timeout values and import policy
   , interpreterState :: TVar InterpreterState  -- Current interpreter state
+  , sessionDeclarations :: TVar [Text]         -- Record of declarations to replay in fresh interpreters
   }
 
 -- | State of the hint interpreter
@@ -82,12 +83,14 @@ newGHCSession config = do
   bindings <- newTVar Set.empty
   modules <- newTVar []
   interpreterSt <- newTVar NotInitialized
+  declarations <- newTVar []
   return $ GHCSessionState
     { sessionId = "default-session"  -- TODO: Generate unique session ID
     , definedBindings = bindings
     , importedModules = modules
     , sessionConfig = config
     , interpreterState = interpreterSt
+    , sessionDeclarations = declarations
     }
 
 -- | Add a new binding to the session state
@@ -104,11 +107,21 @@ listBindings session = Set.toList <$> readTVar (definedBindings session)
 
 -- | Add a successfully imported module
 addImportedModule :: GHCSessionState -> String -> STM ()
-addImportedModule session moduleName = modifyTVar' (importedModules session) (moduleName:)
+addImportedModule session moduleName =
+  modifyTVar' (importedModules session) $ \mods ->
+    moduleName : filter (/= moduleName) mods
 
 -- | Get list of imported modules
 listImportedModules :: GHCSessionState -> STM [String]
 listImportedModules session = readTVar (importedModules session)
+
+-- | Record a declaration so it can be replayed in subsequent interpreter sessions
+recordDeclaration :: GHCSessionState -> Text -> STM ()
+recordDeclaration session decl = modifyTVar' (sessionDeclarations session) (++ [decl])
+
+-- | Retrieve the list of previously recorded declarations
+listDeclarations :: GHCSessionState -> STM [Text]
+listDeclarations session = readTVar (sessionDeclarations session)
 
 -- | Execute action with managed GHC session
 withGHCSession :: GHCConfig -> (GHCSessionState -> STM a) -> STM (Either String a)
@@ -191,3 +204,4 @@ cleanupSession :: GHCSessionState -> STM ()
 cleanupSession session = do
   writeTVar (definedBindings session) Set.empty
   writeTVar (importedModules session) []
+  writeTVar (sessionDeclarations session) []

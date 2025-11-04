@@ -7,16 +7,16 @@ module HsJupyter.Runtime.Evaluation
 
 import Control.Concurrent.STM (tryReadTMVar, atomically)
 -- MVar not needed here; concurrent coordination uses STM in this module
-import Data.Aeson (object, (.=), Value(..))
+import Data.Aeson (object, (.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (NominalDiffTime, getCurrentTime, diffUTCTime)
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
-import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic, mkError, mkInfo)
-import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, defaultGHCConfig)
-import HsJupyter.Runtime.GHCSession (newGHCSession, GHCSessionState)
+import HsJupyter.Runtime.Diagnostics (mkInfo)
+import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, ghcConfigFromBudget)
+import HsJupyter.Runtime.GHCSession (newGHCSession, cleanupSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
 import System.IO.Unsafe (unsafePerformIO)
 import HsJupyter.Runtime.SessionState
@@ -27,6 +27,7 @@ import HsJupyter.Runtime.SessionState
   , RuntimeSessionState(..)
   , StreamChunk(..)
   , StreamName(..)
+  , ResourceBudget(..)
   , incrementExecutionCount
   , rssExecutionCount
   )
@@ -35,20 +36,27 @@ import HsJupyter.Runtime.SessionState
 -- This is a temporary solution for Phase 4. In a production system,
 -- this would be managed per-user session with proper cleanup.
 {-# NOINLINE globalGHCSession #-}
-globalGHCSession :: IORef (Maybe GHCSessionState)
+globalGHCSession :: IORef (Maybe (ResourceBudget, GHCSessionState))
 globalGHCSession = unsafePerformIO (newIORef Nothing)
 
 -- | Get or create the persistent GHC session
-getOrCreateGHCSession :: IO GHCSessionState
-getOrCreateGHCSession = do
+getOrCreateGHCSession :: ResourceBudget -> IO GHCSessionState
+getOrCreateGHCSession budget = do
   maybeSession <- readIORef globalGHCSession
   case maybeSession of
-    Just session -> return session
-    Nothing -> do
-      -- Create new session with default config
-      session <- atomically $ newGHCSession defaultGHCConfig
-      writeIORef globalGHCSession (Just session)
-      return session
+    Just (savedBudget, session)
+      | savedBudget == budget -> pure session
+      | otherwise -> do
+          atomically (cleanupSession session)
+          createSession
+    Nothing -> createSession
+  where
+    createSession = do
+      -- Create new session with config derived from the runtime budget
+      let config = ghcConfigFromBudget budget
+      session <- atomically $ newGHCSession config
+      writeIORef globalGHCSession (Just (budget, session))
+      pure session
 
 -- | Determine if code is a declaration (let, function definition) or expression
 isDeclaration :: Text -> Bool
@@ -67,7 +75,7 @@ isDeclaration code =
       let trimmedLine = dropWhile (== ' ') line
           words' = words trimmedLine
       in case words' of
-           (name:params) -> '=' `elem` line && 
+           (name:_params) -> '=' `elem` line && 
                            not ("==" `isInfixOf` line) && 
                            not ("=>" `isInfixOf` line) &&
                            not (null name) &&
@@ -137,10 +145,7 @@ runEchoEvaluation
   -> IO (ExecutionOutcome, RuntimeSessionState)
 runEchoEvaluation newState executionCount job = do
   let payload = object
-        [ "execution_count" .= executionCount
-        , "data" .= object
-            [ "text/plain" .= jobSource job
-            ]
+        [ "text/plain" .= jobSource job
         ]
       stream = StreamChunk StreamStdout (jobSource job)
       outcome = ExecutionOutcome
@@ -160,8 +165,9 @@ runGHCEvaluation
   -> ExecutionJob
   -> IO (ExecutionOutcome, RuntimeSessionState)
 runGHCEvaluation newState executionCount job = do
-  -- Get or create persistent GHC session
-  ghcSession <- getOrCreateGHCSession
+  -- Get or create persistent GHC session respecting runtime budget
+  let budget = rssResourceBudget newState
+  ghcSession <- getOrCreateGHCSession budget
   
   -- Evaluate the expression (or declaration based on content)
   result <- if isDeclaration (jobSource job)
@@ -187,10 +193,11 @@ runGHCEvaluation newState executionCount job = do
     
     Right value -> do
       let stream = StreamChunk StreamStdout value
+          payload = object ["text/plain" .= value]
           outcome = ExecutionOutcome
             { outcomeStatus = ExecutionOk
             , outcomeStreams = [stream]
-            , outcomePayload = [String value]  -- Simple String payload for now
+            , outcomePayload = [payload]
             , outcomeDiagnostics = [mkInfo "GHC evaluation successful"]
             , outcomeExecutionCount = executionCount
             , outcomeDuration = 0  -- Will be set by caller

@@ -186,7 +186,7 @@ extractSourceLocation msg =
 -- | Convert GHCError to RuntimeDiagnostic for Phase 2 integration
 ghcErrorToDiagnostic :: GHCError -> RuntimeDiagnostic
 ghcErrorToDiagnostic ghcErr = case ghcErr of
-  CompilationError msg location suggestions ->
+  CompilationError msg location _ ->
     mkDiagnostic SeverityError (msg <> " at " <> locationText location)
   RuntimeError msg ->
     mkDiagnostic SeverityError ("Runtime error: " <> msg)

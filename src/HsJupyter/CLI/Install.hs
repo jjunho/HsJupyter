@@ -47,81 +47,66 @@ module HsJupyter.CLI.Install
   , uninstallKernel
   ) where
 
-import Data.Text (Text)
-import qualified Data.Text as T
+import Control.Concurrent.STM (TMVar, atomically, newTMVarIO, putTMVar, readTMVar, takeTMVar)
+import Control.Exception (IOException, SomeException, catch, finally, try)
 import Control.Monad (filterM, when)
-import Control.Exception (try, IOException, SomeException, catch, finally)
-import qualified Control.Exception
 import qualified System.Timeout
-import System.Directory 
-  ( createDirectoryIfMissing
-  , doesDirectoryExist
-  , doesFileExist
-  , getPermissions
-  , writable
-  , readable
-  , executable
-  , getHomeDirectory
-  , findExecutable
-  , removeDirectoryRecursive
-  , listDirectory
-  )
-import System.FilePath ((</>), takeDirectory)
-import System.Environment (lookupEnv, getExecutablePath)
-import Data.Aeson 
-  ( Value(..)
-  , Object
-  , Array
+import Data.Aeson
+  ( Object
+  , Value(..)
   , (.=)
-  , object
-  , encode
   , eitherDecode
-  )
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Aeson.Key as K
-import qualified Data.Vector as V
-import qualified Data.ByteString.Lazy as LBS
-import Data.Maybe (fromMaybe)
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
-import Data.Time (getCurrentTime)
-import Control.Monad (when)
-import System.Environment (lookupEnv)
-
--- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
-import HsJupyter.Runtime.ResourceGuard 
-  ( ResourceGuard
-  , ResourceLimits(..)  
-  , withResourceGuard
-  , defaultResourceLimits
-  , ResourceViolation(..)
-  )
-import HsJupyter.Runtime.ErrorHandling
-  ( withErrorContext
-  , enrichDiagnostic
-  )
-
--- T037: Command output formatting imports
-import HsJupyter.CLI.Output (formatOutput, OutputFormat(..))
-import HsJupyter.CLI.Commands (ListOptions(..), VersionOptions(..), UninstallOptions(..))
-
--- T020: Structured logging integration following constitutional patterns
-import HsJupyter.Runtime.Telemetry 
-  ( RuntimeMetric(..)
-  , emitMetric
+  , encode
+  , object
   )
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as K
-import Data.Time.Clock (getCurrentTime, diffUTCTime)
-import System.IO (stdout, hPutStrLn)
-import Control.Monad.IO.Class (liftIO)
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.ByteString.Lazy as LBS
+import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time.Clock (getCurrentTime)
+import qualified Data.Vector as V
+import System.Directory
+  ( createDirectoryIfMissing
+  , doesDirectoryExist
+  , doesFileExist
+  , executable
+  , findExecutable
+  , getHomeDirectory
+  , getPermissions
+  , listDirectory
+  , readable
+  , removeDirectoryRecursive
+  , writable
+  )
+import System.Environment (getExecutablePath, lookupEnv)
+import System.Exit (ExitCode(..))
+import System.FilePath ((</>), takeDirectory)
+import System.IO (hPutStrLn, stdout)
+import System.Process (readProcessWithExitCode)
+
+-- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
+import HsJupyter.Runtime.ResourceGuard
+  ( ResourceLimits(..)
+  , ResourceViolation(..)
+  , defaultResourceLimits
+  , withResourceGuard
+  )
+import HsJupyter.Runtime.ErrorHandling (withErrorContext)
+
+-- T037: Command output formatting imports
+import HsJupyter.CLI.Output (OutputFormat(..), formatOutput)
+import HsJupyter.CLI.Commands (ListOptions(..), UninstallOptions(..), VersionOptions(..))
+
+-- T020: Structured logging integration following constitutional patterns
+import HsJupyter.Runtime.Telemetry
+  ( RuntimeMetric(..)
+  , emitMetric
+  )
 
 -- T021: Cancellation support imports
-import Control.Concurrent.STM (STM, TMVar, newTMVarIO, takeTMVar, putTMVar, readTMVar, atomically)
-import Control.Concurrent.Async (async, cancel, wait, race_)
-import Control.Concurrent (threadDelay)
-import Control.Exception (bracket, SomeException)
 
 import HsJupyter.CLI.Types 
   ( InstallScope(..)
@@ -163,7 +148,7 @@ listKernelInstallations options = withErrorContext "list-kernel-installations" $
     Nothing -> do
       result <- findKernelspecDirectories
       case result of
-        Left diag -> return []
+        Left _ -> return []
         Right dirs -> return dirs
   
   -- Scan for HsJupyter installations in each directory
@@ -704,9 +689,6 @@ withCLIResourceError operation action = do
 withCLIResourceCleanup :: IO () -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
 withCLIResourceCleanup cleanup action = 
   action `finally` cleanup
-  where
-    finally :: IO a -> IO b -> IO a
-    finally = Control.Exception.finally
 
 -- | CLI-specific timeout wrapper for operations
 withCLITimeout :: Int -> Text -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
@@ -781,11 +763,11 @@ cancelOperation token = do
   logCLIOperation "cancellation" "Operation cancellation requested" [("component", A.String "cancellation")]
   -- Set cancellation flag if not already set
   atomically $ do
-    cancelled <- takeTMVar (ctCancelled token)
+    _ <- takeTMVar (ctCancelled token)
     putTMVar (ctCancelled token) True
   -- Execute cleanup actions in reverse order (LIFO)
   cleanupActions <- atomically $ readTMVar (ctCleanupActions token)
-  mapM_ (\action -> action `Control.Exception.catch` \(_ :: SomeException) -> return ()) (reverse cleanupActions)
+  mapM_ (\action -> action `catch` \(_ :: SomeException) -> return ()) (reverse cleanupActions)
   logCLIOperation "cancellation" "Cleanup actions completed" [("actions_count", A.Number $ fromIntegral $ length cleanupActions)]
 
 -- | Check if operation has been cancelled
@@ -807,7 +789,7 @@ withCancellation token operation = do
     then return $ Left $ SystemIntegrationError "Operation cancelled before start"
     else do
       -- Execute operation and handle cancellation
-      result <- (Right <$> operation) `Control.Exception.catch` \(_ :: SomeException) -> do
+      result <- (Right <$> operation) `catch` \(_ :: SomeException) -> do
         -- Check if cancellation was the cause
         cancelled' <- isCancelled token
         if cancelled'
@@ -849,7 +831,7 @@ executeInstall options = withErrorContext "kernel-installation" $ do
         , rcMaxOutputBytes = 10485760  -- 10MB output limit for logs
         }
   
-  result <- withResourceGuard installationLimits $ \guard -> do
+  result <- withResourceGuard installationLimits $ \_ -> do
     -- Step 1: Detect Jupyter environment (T015 implementation)
     logInstallStep "detect-environment" "Detecting Jupyter environment" []
     jupyterEnvResult <- withCLIResourceError "jupyter-environment-detection" detectJupyterEnvironment
@@ -903,7 +885,7 @@ detectJupyterEnvironment = withErrorContext "jupyter-environment-detection" $ do
         , rcMaxOutputBytes = 524288  -- 512KB output limit for command outputs
         }
   
-  withResourceGuard detectionLimits $ \guard -> do
+  withResourceGuard detectionLimits $ \_ -> do
     -- Use the Utilities module function for core detection
     result <- withCLIResourceError "core-jupyter-detection" Utilities.detectJupyterEnvironment
     case result of
@@ -1329,7 +1311,7 @@ executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registra
         , rcMaxOutputBytes = 1048576  -- 1MB output limit for logs
         }
   
-  withResourceGuard registrationLimits $ \guard -> do
+  withResourceGuard registrationLimits $ \_ -> do
     -- Step 1: Find suitable kernelspec directory for installation  
     targetDirectoryResult <- withCLIResourceError "directory-selection" $ 
       selectInstallationDirectory options jupyterEnv
@@ -1412,12 +1394,12 @@ findBestInstallationDirectory [] = return Nothing
 findBestInstallationDirectory dirs = do
   -- Prefer user directories over system directories
   userDirs <- filterUserDirectories dirs
-  if not (null userDirs)
-    then return $ Just (head userDirs)
-    else do
+  case userDirs of
+    (dir:_) -> return $ Just dir
+    [] -> do
       -- Fall back to system directories if no user directories available
       systemDirs <- filterSystemDirectories dirs
-      return $ if null systemDirs then Nothing else Just (head systemDirs)
+      return $ listToMaybe systemDirs
 
 -- | Resolve kernel name, handling conflicts with existing installations (T018)
 resolveKernelName :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Text)

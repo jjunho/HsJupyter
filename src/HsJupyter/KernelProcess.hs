@@ -5,59 +5,35 @@ module HsJupyter.KernelProcess
   , runKernel
   ) where
 
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (async, cancel)
-import Control.Exception (bracket, displayException, try)
-import Control.Monad (forever, when)
-import Data.Aeson (eitherDecodeFileStrict')
-import Data.Int (Int64)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import           Control.Concurrent (threadDelay)
+import           Control.Concurrent.Async (async, cancel, link)
+import           Control.Exception (bracket, displayException, try)
+import           Control.Monad (forever, unless, when)
+import           Data.Aeson (eitherDecodeFileStrict')
+import           Data.Int (Int64)
+import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
-import Data.Foldable (for_)
+import           Data.Foldable (for_)
 import qualified Data.List.NonEmpty as NE
-import Data.Maybe (fromMaybe)
-import Data.Text (Text)
+import           Data.Maybe (fromMaybe)
+import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory)
-import System.Exit (die)
-import System.FilePath ((</>))
+import           Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
+import           System.Directory (createDirectoryIfMissing, doesFileExist, getTemporaryDirectory)
+import           System.Exit (die)
+import           System.FilePath ((</>))
 import qualified System.ZMQ4 as Z
+import           Katip
 
-import HsJupyter.Bridge.JupyterBridge
-  ( BridgeContext(..)
-  , BridgeError(..)
-  , handleExecuteOnce
-  , handleKernelInfo
-  , handleInterrupt
-  , logBridgeEvent
-  , mkBridgeContext
-  )
-import HsJupyter.Runtime.Manager
-  ( withRuntimeManager
-  )
-import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-import HsJupyter.Bridge.Protocol.Codec
-  ( EnvelopeFrameError(..)
-  , parseEnvelopeFrames
-  , renderEnvelopeFrames
-  )
-import HsJupyter.Bridge.Protocol.Envelope
-  ( ProtocolEnvelope(..)
-  , MessageHeader(..)
-  , envelopeContent
-  , envelopeHeader
-  , msgType
-  )
-import HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
-import HsJupyter.Kernel.Types
-import HsJupyter.Runtime.Manager (withRuntimeManager)
-import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-
-
+import           HsJupyter.Bridge.JupyterBridge
+import           HsJupyter.Bridge.Protocol.Codec
+import           HsJupyter.Bridge.Protocol.Envelope
+import           HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
+import           HsJupyter.Kernel.Types
+import           HsJupyter.Runtime.Manager (withRuntimeManager)
 
 -- | Load and validate the kernel configuration from a connection file.
 loadKernelProcessConfig :: FilePath -> Maybe LogLevel -> IO (Either LoadConfigError KernelProcessConfig)
@@ -118,40 +94,36 @@ withKernel cfg action = do
         configureSocket heartbeat
         bindAll shell control stdinSock iopub heartbeat
         bridgeCtx <- mkBridgeContext cfg manager
-        logBridgeEvent cfg (logLevel cfg) LogInfo "Kernel sockets bound"
+        runKatipT (getLogEnv bridgeCtx) $
+          logFM InfoS "Kernel sockets bound"
         now <- getCurrentTime
         lastBeatRef <- newIORef now
         statusRef <- newIORef Healthy
+        shutdownRef <- newIORef False
         let keyBytes = key cfg
             loops =
-              [ shellLoop bridgeCtx keyBytes shell iopub
-              , controlLoop bridgeCtx keyBytes control
+              [ shellLoop bridgeCtx keyBytes shell iopub shutdownRef
+              , controlLoop bridgeCtx keyBytes control shutdownRef
               , heartbeatLoop heartbeat lastBeatRef
-              , heartbeatMonitorLoop cfg lastBeatRef statusRef
+              , heartbeatMonitorLoop bridgeCtx lastBeatRef statusRef
               ]
-        bracket (traverse async loops) (mapM_ cancel) $ \_ -> action
+        bracket (traverse async loops) (mapM_ cancel) $ \threads -> do
+          mapM_ link threads
+          action
   where
-    configureSocket sock = do
-      Z.setLinger (Z.restrict (0 :: Int)) sock
-      pure ()
-
-    bindAll shell control stdinSock iopub heartbeat = do
-      bindOrDie "shell"     shell     (endpoint (shellPort cfg))
-      bindOrDie "control"   control   (endpoint (controlPort cfg))
-      bindOrDie "stdin"     stdinSock (endpoint (stdinPort cfg))
-      bindOrDie "iopub"     iopub     (endpoint (iopubPort cfg))
-      bindOrDie "heartbeat" heartbeat (endpoint (heartbeatPort cfg))
-
+    configureSocket sock = Z.setLinger (Z.restrict (0 :: Int)) sock
+    bindAll s c i p h = do
+      bindOrDie "shell"     s (endpoint (shellPort cfg))
+      bindOrDie "control"   c (endpoint (controlPort cfg))
+      bindOrDie "stdin"     i (endpoint (stdinPort cfg))
+      bindOrDie "iopub"     p (endpoint (iopubPort cfg))
+      bindOrDie "heartbeat" h (endpoint (heartbeatPort cfg))
     endpoint port = T.unpack (transport cfg) <> "://" <> T.unpack (ipAddress cfg) <> ":" <> show port
-
     bindOrDie label sock ep = do
-      result <- (try (Z.bind sock ep) :: IO (Either Z.ZMQError ()))
+      result <- try (Z.bind sock ep) :: IO (Either Z.ZMQError ())
       case result of
         Right _ -> pure ()
-        Left err -> do
-          let detail = "[hsjupyter] failed to bind " <> label <> " socket at " <> ep <> " : " <> displayException err
-          putStrLn detail
-          die "[hsjupyter] kernel startup aborted"
+        Left err -> die $ "[hsjupyter] failed to bind " <> label <> " socket at " <> ep <> " : " <> displayException err
 
 -- | Run the kernel loops indefinitely (CTRL+C to exit).
 runKernel :: KernelProcessConfig -> IO ()
@@ -159,74 +131,82 @@ runKernel cfg = withKernel cfg (forever (threadDelay 1000000))
 
 -- Internal loops ------------------------------------------------------------
 
-shellLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> Z.Socket Z.Pub -> IO ()
-shellLoop ctx keyBytes shellSock iopubSock = forever $ do
-  logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: waiting for message..."
-  frames <- Z.receiveMulti shellSock
-  logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
-    ("Shell loop: received " <> T.pack (show (length frames)) <> " frames")
+shellLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> Z.Socket Z.Pub -> IORef Bool -> IO ()
+shellLoop ctx keyBytes shellSock iopubSock shutdownRef = forever $ runKatipT (getLogEnv ctx) $ do
+  logFM InfoS "Shell loop: waiting for message..."
+  frames <- liftIO $ Z.receiveMulti shellSock
+  logFM DebugS $ logStr $ "Shell loop: received " <> show (length frames) <> " frames"
+  
   case parseEnvelopeFrames frames of
-    Left (EnvelopeFrameError err) -> do
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed shell frame: " <> err)
+    Left (EnvelopeFrameError err) ->
+      logFM ErrorS $ logStr $ "Shell loop: parseEnvelopeFrames failed: " <> T.unpack err
     Right envelope -> do
-      let payloadBytes = LBS.length (Aeson.encode (envelopeContent envelope))
-          mtype = msgType (envelopeHeader envelope)
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
-        ("Shell loop: parsed envelope, msg_type=" <> mtype)
-      when (payloadBytes > payloadLimitBytes) $
-        logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn
-          ("Received payload exceeding 1MB (" <> T.pack (show payloadBytes) <> " bytes)")
+      let mtype = msgType (envelopeHeader envelope)
+      logFM InfoS $ logStr $ "Shell loop: parsed envelope, msg_type=" <> T.unpack mtype
       
       -- Route based on message type
       result <- case mtype of
-        "kernel_info_request" -> do
-          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: calling handleKernelInfo"
-          infoResult <- handleKernelInfo ctx envelope
-          case infoResult of
+        "kernel_info_request" ->
+          liftIO (handleKernelInfo ctx envelope) >>= \case
             Left err -> do
-              logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogError "Shell loop: handleKernelInfo failed"
-              pure $ Left err
-            Right reply -> do
-              logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo "Shell loop: handleKernelInfo succeeded"
-              pure $ Right [reply]
-        "execute_request" -> handleExecuteOnce ctx envelope
+              logFM ErrorS "Shell loop: handleKernelInfo failed"
+              return $ Left err
+            Right reply -> return $ Right [reply]
+        "execute_request" -> do
+          valid <- liftIO $ verifySignature keyBytes envelope
+          unless valid $
+            logFM WarningS "Rejected envelope with invalid signature"
+          if not valid
+            then return $ Left SignatureValidationFailed
+            else case fromExecuteRequest envelope of
+              Nothing -> do
+                logFM WarningS "Failed to decode execute_request"
+                return $ Left (DecodeFailure "Unsupported content type")
+              Just typed -> do
+                let busyEnv = statusEnvelope typed "busy"
+                    busyFrames = renderEnvelopeFrames keyBytes busyEnv
+                liftIO $ sendIOPub busyEnv busyFrames
+                envelopes <- liftIO $ handleExecuteOnce ctx typed
+                return (Right envelopes)
+        "shutdown_request" -> do
+            liftIO $ writeIORef shutdownRef True
+            -- TODO: Handle shutdown reply
+            return $ Right []
         _ -> do
-          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn 
-            ("Unsupported message type on shell: " <> mtype)
-          pure $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
+          logFM WarningS $ logStr $ "Unsupported message type on shell: " <> T.unpack mtype
+          return $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
       
       case result of
         Left bridgeErr ->
-          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogError (bridgeErrorMessage bridgeErr)
+          logFM ErrorS $ logStr $ T.unpack (bridgeErrorMessage bridgeErr)
         Right envelopes -> do
-          logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
-            ("Shell loop: sending " <> T.pack (show (length envelopes)) <> " reply envelope(s)")
+          logFM InfoS $ logStr $ "Shell loop: sending " <> show (length envelopes) <> " reply envelope(s)"
           for_ (zip [0 :: Int ..] envelopes) $ \(idx, env) -> do
             let rendered = renderEnvelopeFrames keyBytes env
             if idx == 0
               then do
-                logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogInfo 
-                  ("Shell loop: sending reply on shell socket (" <> T.pack (show (length rendered)) <> " frames)")
-                sendFrames shellSock rendered
-              else sendIOPub env rendered
+                logFM DebugS $ logStr $ "Shell loop: sending reply on shell socket (" <> show (length rendered) <> " frames)"
+                liftIO $ sendFrames shellSock rendered
+              else liftIO $ sendIOPub env rendered
   where
     sendIOPub env rendered =
       let topic = TE.encodeUtf8 (msgType (envelopeHeader env))
       in sendFrames iopubSock (topic : rendered)
 
-
 payloadLimitBytes :: Int64
 payloadLimitBytes = 1024 * 1024
-controlLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> IO ()
-controlLoop ctx keyBytes controlSock = forever $ do
-  frames <- Z.receiveMulti controlSock
+
+controlLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> IORef Bool -> IO ()
+controlLoop ctx keyBytes controlSock shutdownRef = forever $ runKatipT (getLogEnv ctx) $ do
+  frames <- liftIO $ Z.receiveMulti controlSock
   case parseEnvelopeFrames frames of
     Left (EnvelopeFrameError err) ->
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn ("Malformed control frame: " <> err)
+      logFM WarningS $ logStr $ "Malformed control frame: " <> T.unpack err
     Right envelope -> do
-      reply <- handleInterrupt ctx envelope
-      let rendered = renderEnvelopeFrames keyBytes reply
-      sendFrames controlSock rendered
+      -- TODO: Implement interrupt logic
+      logFM InfoS $ logStr $ "Control loop received: " <> show (envelopeHeader envelope)
+      when (msgType (envelopeHeader envelope) == "shutdown_request") $
+        liftIO $ writeIORef shutdownRef True
 
 heartbeatLoop :: Z.Socket Z.Rep -> IORef UTCTime -> IO ()
 heartbeatLoop heartbeatSock lastBeatRef = forever $ do
@@ -235,30 +215,26 @@ heartbeatLoop heartbeatSock lastBeatRef = forever $ do
   now <- getCurrentTime
   writeIORef lastBeatRef now
 
-heartbeatMonitorLoop :: KernelProcessConfig -> IORef UTCTime -> IORef HeartbeatStatus -> IO ()
-heartbeatMonitorLoop cfg lastBeatRef statusRef = forever $ do
-  threadDelay heartbeatPollInterval
-  lastBeat <- readIORef lastBeatRef
-  now <- getCurrentTime
+heartbeatMonitorLoop :: BridgeContext -> IORef UTCTime -> IORef HeartbeatStatus -> IO ()
+heartbeatMonitorLoop ctx lastBeatRef statusRef = forever $ runKatipT (getLogEnv ctx) $ do
+  liftIO $ threadDelay heartbeatPollInterval
+  lastBeat <- liftIO $ readIORef lastBeatRef
+  now <- liftIO getCurrentTime
   let latency = diffUTCTime now lastBeat
       newStatus = classify latency
-  currentStatus <- readIORef statusRef
+  currentStatus <- liftIO $ readIORef statusRef
   when (newStatus /= currentStatus) $ do
-    writeIORef statusRef newStatus
-    logBridgeEvent cfg (logLevel cfg) (statusLevel newStatus) (statusMessage latency newStatus)
+    liftIO $ writeIORef statusRef newStatus
+    logFM (statusLevel newStatus) (statusMessage latency newStatus)
   where
     classify dt
       | dt < healthyThreshold      = Healthy
       | dt < unresponsiveThreshold = Degraded
       | otherwise                  = Unresponsive
-
-    statusLevel Healthy      = LogInfo
-    statusLevel Degraded     = LogWarn
-    statusLevel Unresponsive = LogError
-
-    statusMessage dt Healthy      = "Heartbeat healthy (latency " <> T.pack (show dt) <> ")"
-    statusMessage dt Degraded     = "Heartbeat degraded (last probe " <> T.pack (show dt) <> "s ago)"
-    statusMessage dt Unresponsive = "Heartbeat unresponsive (last probe " <> T.pack (show dt) <> "s ago)"
+    statusLevel Healthy      = InfoS
+    statusLevel Degraded     = WarningS
+    statusLevel Unresponsive = ErrorS
+    statusMessage dt s = logStr $ "Heartbeat " <> T.pack (show s) <> " (latency " <> T.pack (show dt) <> ")"
 
 healthyThreshold, unresponsiveThreshold :: NominalDiffTime
 healthyThreshold = 0.5

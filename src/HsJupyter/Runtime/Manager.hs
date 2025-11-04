@@ -10,8 +10,7 @@ module HsJupyter.Runtime.Manager
 
 import Control.Concurrent.Async (Async, async, cancel)
 import Control.Concurrent.STM
-  ( STM
-  , TBQueue
+  ( TBQueue
   , TMVar
   , TVar
   , atomically
@@ -24,8 +23,6 @@ import Control.Concurrent.STM
   , readTVar
   , takeTMVar
   , tryPutTMVar
-  , tryReadTMVar
-  , tryTakeTMVar
   , writeTBQueue
   , writeTVar
   )
@@ -48,8 +45,6 @@ import HsJupyter.Runtime.SessionState
   , initialSessionState
   , ResourceBudget(..)
   )
-import HsJupyter.Runtime.GHCSession (GHCSessionState)
-import HsJupyter.Runtime.GHCRuntime (defaultGHCConfig)
 
 -- | Handle exposed to router/kernel for submitting jobs and interrupts.
 data RuntimeManager = RuntimeManager

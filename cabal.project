@@ -8,3 +8,4 @@ documentation: False
 haddock-all: False
 optimization: 1
 split-sections: True
+test-show-details: always

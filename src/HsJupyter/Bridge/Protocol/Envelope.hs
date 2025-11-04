@@ -1,6 +1,11 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module HsJupyter.Bridge.Protocol.Envelope
   ( Channel(..)
   , MessageHeader(..)
+  , SignaturePayload(..)
+  , payloadFrames
   , ProtocolEnvelope(..)
   , ExecuteRequest(..)
   , ExecuteReply(..)
@@ -13,24 +18,17 @@ module HsJupyter.Bridge.Protocol.Envelope
   , toExecuteReply
   , toKernelInfoReply
   , emptyMetadata
+  , signaturePayloadFrom
   ) where
 
-import Data.Aeson
-  ( FromJSON(..)
-  , ToJSON(..)
-  , Value
-  , (.:)
-  , (.:?)
-  , (.!=)
-  , (.=)
-  , withObject
-  , withText
-  , object
-  )
+import Data.Aeson hiding (decode, encode)
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
+import GHC.Generics (Generic)
 
 -- | Channels defined by the Jupyter messaging protocol.
 data Channel = Shell | IOPub | Control | Stdin | Heartbeat
@@ -39,49 +37,62 @@ data Channel = Shell | IOPub | Control | Stdin | Heartbeat
 -- | Header metadata per Jupyter message.
 data MessageHeader = MessageHeader
   { msgId    :: Text
+  , msgType  :: Text
   , session  :: Text
   , username :: Text
-  , msgType  :: Text
   , version  :: Text
   , date     :: Maybe UTCTime
-  } deriving (Eq, Show)
+  } deriving (Eq, Show, Generic)
 
 instance FromJSON MessageHeader where
   parseJSON = withObject "MessageHeader" $ \obj ->
     MessageHeader
-      <$> obj .: "msg_id"
-      <*> obj .: "session"
-      <*> obj .: "username"
-      <*> obj .: "msg_type"
-      <*> obj .: "version"
+      <$> obj .:  "msg_id"
+      <*> obj .:  "msg_type"
+      <*> obj .:  "session"
+      <*> obj .:  "username"
+      <*> obj .:  "version"
       <*> obj .:? "date"
 
 instance ToJSON MessageHeader where
-  toJSON hdr = object
-    [ "msg_id" .= msgId hdr
-    , "session" .= session hdr
-    , "username" .= username hdr
-    , "msg_type" .= msgType hdr
-    , "version" .= version hdr
-    , "date" .= date hdr
+  toJSON header = object
+    [ "msg_id" .= msgId header
+    , "msg_type" .= msgType header
+    , "session" .= session header
+    , "username" .= username header
+    , "version" .= version header
+    , "date" .= date header
     ]
 
 -- | Envelope capturing all message frames.
+data SignaturePayload = SignaturePayload
+  { spHeader   :: BS.ByteString
+  , spParent   :: BS.ByteString
+  , spMetadata :: BS.ByteString
+  , spContent  :: BS.ByteString
+  } deriving (Eq, Show)
+
+payloadFrames :: SignaturePayload -> [BS.ByteString]
+payloadFrames (SignaturePayload header parent meta content) =
+  [header, parent, meta, content]
+
 data ProtocolEnvelope content = ProtocolEnvelope
-  { envelopeIdentities :: [Text]
-  , envelopeHeader     :: MessageHeader
-  , envelopeParent     :: Maybe MessageHeader
-  , envelopeMetadata   :: Value
-  , envelopeContent    :: content
-  , envelopeSignature  :: Text
+  { envelopeIdentities       :: [BS.ByteString]
+  , envelopeHeader           :: MessageHeader
+  , envelopeParent           :: Maybe MessageHeader
+  , envelopeMetadata         :: Value
+  , envelopeContent          :: content
+  , envelopeSignature        :: Text
+  , envelopeSignaturePayload :: SignaturePayload
   } deriving (Eq, Show)
 
 -- | Execute request payload subset used for the echo runtime.
 data ExecuteRequest = ExecuteRequest
-  { erCode         :: Text
-  , erSilent       :: Bool
-  , erAllowStdin   :: Bool
-  , erStoreHistory :: Bool
+  { erCode            :: Text
+  , erSilent          :: Bool
+  , erAllowStdin      :: Bool
+  , erStoreHistory    :: Bool
+  , erUserExpressions :: Value
   } deriving (Eq, Show)
 
 instance FromJSON ExecuteRequest where
@@ -91,6 +102,7 @@ instance FromJSON ExecuteRequest where
       <*> obj .:? "silent" .!= False
       <*> obj .:? "allow_stdin" .!= False
       <*> obj .:? "store_history" .!= True
+      <*> obj .:? "user_expressions" .!= object []
 
 instance ToJSON ExecuteRequest where
   toJSON req = object
@@ -98,6 +110,7 @@ instance ToJSON ExecuteRequest where
     , "silent" .= erSilent req
     , "allow_stdin" .= erAllowStdin req
     , "store_history" .= erStoreHistory req
+    , "user_expressions" .= erUserExpressions req
     ]
 
 -- | Execute reply payload produced by the runtime.
@@ -162,13 +175,33 @@ fromExecuteRequest env =
 toExecuteReply :: ProtocolEnvelope ExecuteRequest -> ExecuteReply -> ProtocolEnvelope Value
 toExecuteReply env reply = env
   { envelopeContent = toJSON reply
-  , envelopeHeader = (envelopeHeader env)
-      { msgType = "execute_reply" }
+  , envelopeHeader = (envelopeHeader env) { msgType = "execute_reply" }
+  , envelopeSignaturePayload = signaturePayloadFrom
+      ((envelopeHeader env) { msgType = "execute_reply" })
+      (envelopeParent env)
+      (envelopeMetadata env)
+      (toJSON reply)
   }
 
 -- | Utility for consumers needing empty metadata without re-importing aeson internals.
 emptyMetadata :: Value
 emptyMetadata = Aeson.Object mempty
+
+encodeStrict :: ToJSON a => a -> BS.ByteString
+encodeStrict = LBS.toStrict . Aeson.encode
+
+signaturePayloadFrom
+  :: MessageHeader
+  -> Maybe MessageHeader
+  -> Value
+  -> Value
+  -> SignaturePayload
+signaturePayloadFrom header parent metadata content = SignaturePayload
+  { spHeader = encodeStrict header
+  , spParent = encodeStrict (maybe Aeson.Null Aeson.toJSON parent)
+  , spMetadata = encodeStrict metadata
+  , spContent = encodeStrict content
+  }
 
 -- | Kernel info request (empty content, just needs msg_type)
 data KernelInfoRequest = KernelInfoRequest
@@ -226,6 +259,10 @@ toKernelInfoReply :: ProtocolEnvelope KernelInfoRequest -> KernelInfoReply -> Pr
 toKernelInfoReply env reply = env
   { envelopeContent = toJSON reply
   , envelopeParent = Just (envelopeHeader env)
-  , envelopeHeader = (envelopeHeader env)
-      { msgType = "kernel_info_reply" }
+  , envelopeHeader = (envelopeHeader env) { msgType = "kernel_info_reply" }
+  , envelopeSignaturePayload = signaturePayloadFrom
+      ((envelopeHeader env) { msgType = "kernel_info_reply" })
+      (Just (envelopeHeader env))
+      (envelopeMetadata env)
+      (toJSON reply)
   }

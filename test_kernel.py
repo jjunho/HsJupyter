@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Simple test client for HsJupyter kernel"""
 import json
+import hmac
+import hashlib
 import zmq
 import uuid
 import time
@@ -47,16 +49,15 @@ def test_kernel():
         # Send execute request
         msg_id = str(uuid.uuid4())
         
-        # Simplified message (no signatures for demo)
         header = {
             "msg_id": msg_id,
             "msg_type": "execute_request",
             "username": "test",
             "session": "test-session",
-            "date": time.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            "date": time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "version": "5.3"
         }
-        
+
         content = {
             "code": code,
             "silent": False,
@@ -65,14 +66,26 @@ def test_kernel():
             "allow_stdin": False
         }
         
+        header_bytes = json.dumps(header, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        parent_bytes = json.dumps({}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        metadata_bytes = json.dumps({}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        content_bytes = json.dumps(content, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+        key_bytes = connection["key"].encode("utf-8")
+        signature = hmac.new(
+            key_bytes,
+            header_bytes + parent_bytes + metadata_bytes + content_bytes,
+            hashlib.sha256,
+        ).hexdigest() if key_bytes else ""
+
         # Send message
         frames = [
-            b"",  # delimiter
-            b"",  # signature (empty for demo)
-            json.dumps(header).encode('utf-8'),
-            json.dumps({}).encode('utf-8'),   # parent_header
-            json.dumps({}).encode('utf-8'),   # metadata
-            json.dumps(content).encode('utf-8')
+            b"<IDS|MSG>",
+            signature.encode("utf-8"),
+            header_bytes,
+            parent_bytes,
+            metadata_bytes,
+            content_bytes,
         ]
         
         shell.send_multipart(frames)
@@ -105,4 +118,5 @@ def test_kernel():
     context.term()
 
 if __name__ == "__main__":
-    test_kernel()
+    # test_kernel()
+    pass

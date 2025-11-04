@@ -205,7 +205,7 @@ monitorMemoryUsage action = do
           bytesPerMb :: Double
           bytesPerMb = 1024 * 1024
           rawMb :: Int
-          rawMb = fromIntegral (ceiling (fromIntegral usedBytes / bytesPerMb))
+          rawMb = ceiling (fromIntegral usedBytes / bytesPerMb)
           usedMB = if rawMb <= 0 then 1 else rawMb
 
       pure $ case result of

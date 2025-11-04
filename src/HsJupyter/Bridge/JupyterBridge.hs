@@ -9,25 +9,27 @@ module HsJupyter.Bridge.JupyterBridge
   , handleInterrupt
   , logBridgeEvent
   , rejectedCount
+  , incrementRejected
+  , statusEnvelope
   ) where
 
-import Data.Aeson (Value, object, (.=), toJSON)
+import Data.Aeson (Value, object, (.=))
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
-import Data.List (zipWith)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import Data.Time.Clock (getCurrentTime)
+import Data.Version (showVersion)
+import System.Info (compilerVersion)
 
 import HsJupyter.Bridge.Protocol.Codec (verifySignature)
 import HsJupyter.Bridge.Protocol.Envelope
   ( ExecuteReply(..)
-  , ExecuteRequest
+  , ExecuteRequest(..)
   , ExecuteStatus(..)
   , InterruptReply(..)
   , KernelInfoReply(..)
-  , KernelInfoRequest
   , MessageHeader(..)
   , ProtocolEnvelope(..)
   , emptyMetadata
@@ -35,9 +37,9 @@ import HsJupyter.Bridge.Protocol.Envelope
   , envelopeHeader
   , envelopeIdentities
   , envelopeParent
-  , fromExecuteRequest
   , fromKernelInfoRequest
   , msgType
+  , signaturePayloadFrom
   , toExecuteReply
   , toKernelInfoReply
   )
@@ -49,7 +51,6 @@ import HsJupyter.Kernel.Types
   )
 import HsJupyter.Router.RequestRouter
   ( Router
-  , RuntimeStreamChunk(..)
   , acknowledgeInterrupt
   , mkRouter
   , routeExecuteRequest
@@ -94,22 +95,11 @@ rejectedCount = readIORef . bridgeRejected
 
 handleExecuteOnce
   :: BridgeContext
-  -> ProtocolEnvelope Value
-  -> IO (Either BridgeError [ProtocolEnvelope Value])
-handleExecuteOnce ctx envelope = do
-  let sharedKey = key (bridgeConfig ctx)
-  if not (verifySignature sharedKey envelope)
-    then do
-      incrementRejected ctx
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Rejected envelope with invalid signature"
-      pure $ Left SignatureValidationFailed
-    else case fromExecuteRequest envelope of
-      Nothing -> do
-        logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Failed to decode execute_request"
-        pure $ Left (DecodeFailure "Unsupported content type")
-      Just typed -> do
-        outcome <- routeExecuteRequest (bridgeRouter ctx) typed
-        pure (Right (outcomeEnvelopes typed outcome))
+  -> ProtocolEnvelope ExecuteRequest
+  -> IO [ProtocolEnvelope Value]
+handleExecuteOnce ctx request = do
+  outcome <- routeExecuteRequest (bridgeRouter ctx) request
+  pure (outcomeEnvelopes request outcome)
 
 -- | Handle kernel_info_request and return kernel_info_reply
 handleKernelInfo
@@ -129,40 +119,34 @@ handleKernelInfo ctx envelope = do
         pure $ Left (DecodeFailure "Not a kernel_info_request")
       Just typed -> do
         newMsgId <- UUID.toText <$> UUID.nextRandom
+        let compilerVer = T.pack (showVersion compilerVersion)
         let reply = KernelInfoReply
               { kirProtocolVersion = "5.3"
               , kirImplementation = "hsjupyter"
               , kirImplementationVersion = "0.1.0"
               , kirLanguageInfo = object
                   [ "name" .= ("haskell" :: Text)
-                  , "version" .= ("9.12.2" :: Text)
+                  , "version" .= compilerVer
                   , "mimetype" .= ("text/x-haskell" :: Text)
                   , "file_extension" .= (".hs" :: Text)
                   , "pygments_lexer" .= ("haskell" :: Text)
                   , "codemirror_mode" .= ("haskell" :: Text)
                   ]
-              , kirBanner = "HsJupyter - Haskell kernel for Jupyter (GHC 9.12.2)"
+              , kirBanner = "HsJupyter - Haskell kernel for Jupyter (GHC " <> compilerVer <> ")"
               , kirHelpLinks = []
               , kirStatus = "ok"
               }
             replyEnv = toKernelInfoReply typed reply
             updatedHeader = (envelopeHeader replyEnv) { msgId = newMsgId }
-        pure $ Right (replyEnv { envelopeHeader = updatedHeader })
-
-makeStreamEnvelope :: ProtocolEnvelope Value -> RuntimeStreamChunk -> ProtocolEnvelope Value
-makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
-  let header = (envelopeHeader reqEnv) { msgType = "stream" }
-  in ProtocolEnvelope
-      { envelopeIdentities = [T.pack "stream"]
-      , envelopeHeader = header
-      , envelopeParent = Just (envelopeHeader reqEnv)
-      , envelopeMetadata = emptyMetadata
-      , envelopeContent = object
-          [ "name" .= name
-          , "text" .= text
-          ]
-      , envelopeSignature = ""
-      }
+            updatedEnv = replyEnv
+              { envelopeHeader = updatedHeader
+              , envelopeSignaturePayload = signaturePayloadFrom
+                  updatedHeader
+                  (envelopeParent replyEnv)
+                  (envelopeMetadata replyEnv)
+                  (envelopeContent replyEnv)
+              }
+        pure $ Right updatedEnv
 
 -- | Produce an interrupt acknowledgement envelope.
 handleInterrupt
@@ -172,10 +156,16 @@ handleInterrupt
 handleInterrupt ctx env = do
   InterruptReply status <- acknowledgeInterrupt (bridgeRouter ctx) env
   let replyHeader = (envelopeHeader env) { msgType = "interrupt_reply" }
+      parentHeader = Just (envelopeHeader env)
+      metadata = emptyMetadata
+      replyContent = object ["status" .= status]
   pure env
     { envelopeHeader = replyHeader
-    , envelopeContent = object ["status" .= status]
+    , envelopeParent = parentHeader
+    , envelopeMetadata = metadata
+    , envelopeContent = replyContent
     , envelopeSignature = ""
+    , envelopeSignaturePayload = signaturePayloadFrom replyHeader parentHeader metadata replyContent
     }
 
 -- Envelope rendering -------------------------------------------------------
@@ -190,10 +180,12 @@ outcomeEnvelopes request outcome =
         , executeReplyStatus = statusToReply (outcomeStatus outcome)
         , executeReplyPayload = []
         }
+      executeInput = executeInputEnvelope request (outcomeExecutionCount outcome)
       streams = fmap (streamEnvelope request) (outcomeStreams outcome)
       results = zipWith (resultEnvelope request (outcomeExecutionCount outcome)) [0 :: Int ..] (outcomePayload outcome)
       diagnostics = concatMap (diagnosticEnvelopes request) (outcomeDiagnostics outcome)
-  in reply : streams ++ results ++ diagnostics
+      idle = statusEnvelope request "idle"
+  in reply : executeInput : (streams ++ results ++ diagnostics) ++ [idle]
 
 streamEnvelope
   :: ProtocolEnvelope ExecuteRequest
@@ -201,17 +193,20 @@ streamEnvelope
   -> ProtocolEnvelope Value
 streamEnvelope request (StreamChunk name text) =
   let header = (envelopeHeader request) { msgType = "stream" }
+      parentHeader = Just (envelopeHeader request)
+      metadata = emptyMetadata
       content = object
         [ "name" .= streamNameLabel name
         , "text" .= text
         ]
   in ProtocolEnvelope
-       { envelopeIdentities = envelopeIdentities request
+       { envelopeIdentities = []
        , envelopeHeader = header
-       , envelopeParent = Just (envelopeHeader request)
-       , envelopeMetadata = emptyMetadata
+       , envelopeParent = parentHeader
+       , envelopeMetadata = metadata
        , envelopeContent = content
        , envelopeSignature = ""
+       , envelopeSignaturePayload = signaturePayloadFrom header parentHeader metadata content
        }
 
 resultEnvelope
@@ -222,19 +217,63 @@ resultEnvelope
   -> ProtocolEnvelope Value
 resultEnvelope request count index value =
   let header = (envelopeHeader request) { msgType = "execute_result" }
+      parentHeader = Just (envelopeHeader request)
       content = object
         [ "data" .= value
         , "metadata" .= object []
         , "execution_count" .= count
         , "index" .= index
         ]
+      metadata = object []
   in ProtocolEnvelope
-       { envelopeIdentities = envelopeIdentities request
+       { envelopeIdentities = []
        , envelopeHeader = header
-       , envelopeParent = Just (envelopeHeader request)
-       , envelopeMetadata = object []
+       , envelopeParent = parentHeader
+       , envelopeMetadata = metadata
        , envelopeContent = content
        , envelopeSignature = ""
+       , envelopeSignaturePayload = signaturePayloadFrom header parentHeader metadata content
+       }
+
+executeInputEnvelope
+  :: ProtocolEnvelope ExecuteRequest
+  -> Int
+  -> ProtocolEnvelope Value
+executeInputEnvelope request count =
+  let header = (envelopeHeader request) { msgType = "execute_input" }
+      parentHeader = Just (envelopeHeader request)
+      content = object
+        [ "code" .= erCode (envelopeContent request)
+        , "execution_count" .= count
+        ]
+      metadata = emptyMetadata
+  in ProtocolEnvelope
+       { envelopeIdentities = []
+       , envelopeHeader = header
+       , envelopeParent = parentHeader
+       , envelopeMetadata = metadata
+       , envelopeContent = content
+       , envelopeSignature = ""
+       , envelopeSignaturePayload = signaturePayloadFrom header parentHeader metadata content
+       }
+
+statusEnvelope
+  :: ProtocolEnvelope a
+  -> Text
+  -> ProtocolEnvelope Value
+statusEnvelope request state =
+  let header = (envelopeHeader request) { msgType = "status" }
+      parentHeader = Just (envelopeHeader request)
+      metadata = emptyMetadata
+      content = object ["execution_state" .= state]
+  in ProtocolEnvelope
+       { envelopeIdentities = []
+       , envelopeHeader = header
+       , envelopeParent = parentHeader
+       , envelopeMetadata = metadata
+       , envelopeContent = content
+       , envelopeSignature = ""
+       , envelopeSignaturePayload = signaturePayloadFrom header parentHeader metadata content
        }
 
 diagnosticEnvelopes
@@ -243,17 +282,20 @@ diagnosticEnvelopes
   -> [ProtocolEnvelope Value]
 diagnosticEnvelopes request diag =
   let header = (envelopeHeader request) { msgType = "stream" }
+      parentHeader = Just (envelopeHeader request)
+      metadata = emptyMetadata
       payload = object
         [ "name" .= ("stderr" :: Text)
         , "text" .= renderDiagnostic diag
         ]
   in [ ProtocolEnvelope
-         { envelopeIdentities = envelopeIdentities request
+         { envelopeIdentities = []
          , envelopeHeader = header
-         , envelopeParent = Just (envelopeHeader request)
-         , envelopeMetadata = emptyMetadata
+         , envelopeParent = parentHeader
+         , envelopeMetadata = metadata
          , envelopeContent = payload
          , envelopeSignature = ""
+         , envelopeSignaturePayload = signaturePayloadFrom header parentHeader metadata payload
          }
      ]
 

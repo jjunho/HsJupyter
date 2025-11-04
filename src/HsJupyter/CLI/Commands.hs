@@ -117,39 +117,6 @@ defaultInstallOptions = InstallOptions
   , ioConnectionTimeout = Nothing     -- Use Jupyter default timeout
   }
 
--- | Default doctor options (Phase 6 US4)
-defaultDoctorOptions :: DoctorOptions
-defaultDoctorOptions = DoctorOptions
-  { doCheckComponents = [AllComps]    -- Check all components by default
-  , doFixIssues = False               -- Don't auto-fix by default (safety)
-  , doReportFile = Nothing            -- No report file by default
-  }
-
--- | Default uninstall options (Phase 6 US4)
-defaultUninstallOptions :: UninstallOptions
-defaultUninstallOptions = UninstallOptions
-  { uoRemoveAll = False               -- Don't remove all by default (safety)
-  , uoKernelspecDir = Nothing         -- Use all standard directories
-  , uoConfirm = False                 -- Require confirmation by default (safety)
-  -- T038: Additional default values
-  , uoForce = False                   -- Don't force removal by default (safety)
-  , uoCleanupAll = False              -- Don't cleanup by default
-  , uoRemoveConfig = False            -- Don't remove config by default
-  , uoRemoveLogs = False              -- Don't remove logs by default
-  }
-
--- | Default list options (Phase 6 US4)
-defaultListOptions :: ListOptions
-defaultListOptions = ListOptions
-  { loShowAll = False                 -- Show only functional installations by default
-  , loSearchPath = Nothing            -- Search all standard paths
-  }
-
--- | Default version options (Phase 6 US4)
-defaultVersionOptions :: VersionOptions
-defaultVersionOptions = VersionOptions
-  { voCheckCompatibility = False      -- Don't check compatibility by default (speed)
-  }
 
 -- | Top-level CLI commands with Phase 6 US4 enhancements
 data CLICommand
@@ -164,8 +131,8 @@ data CLICommand
 parseCommand :: [String] -> Either String CLICommand
 parseCommand args = 
   let parser = commandParser
-      prefs = defaultPrefs { prefShowHelpOnError = True, prefHelpLongEquals = True }
-      result = execParserPure prefs (info parser cmdHelp) args
+      parserPrefs = defaultPrefs { prefShowHelpOnError = True, prefHelpLongEquals = True }
+      result = execParserPure parserPrefs (info parser cmdHelp) args
   in case result of
        Options.Applicative.Success cmd -> Right cmd
        Options.Applicative.Failure failure -> Left $ show failure
@@ -254,7 +221,7 @@ environmentVarsParser = many $ option envVarReader $
 envVarReader :: ReadM (Text, Text)
 envVarReader = eitherReader $ \s ->
   case T.breakOn "=" (T.pack s) of
-    (key, value) | not (T.null value) -> Right (key, T.drop 1 value)
+    (key, val) | not (T.null val) -> Right (key, T.drop 1 val)
     _ -> Left $ "Invalid environment variable format. Expected KEY=VALUE, got: " ++ s
 
 -- | Kernel arguments parser (Phase 5 US3)
@@ -317,4 +284,3 @@ versionOptionsParser = VersionOptions
 -- | Help text for CLI
 cmdHelp :: InfoMod a
 cmdHelp = briefDesc <> header "hs-jupyter-kernel - Install and manage Haskell Jupyter kernels"
-

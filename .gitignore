@@ -75,3 +75,6 @@ secrets/
 # Debug/dump files
 all.txt
 docs.txt
+
+.local/
+.ipynb_checkpoints/

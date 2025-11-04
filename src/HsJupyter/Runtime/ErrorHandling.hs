@@ -33,7 +33,7 @@ module HsJupyter.Runtime.ErrorHandling
   , compilationError
   ) where
 
-import Control.Exception (Exception, SomeException, catch, bracket, finally)
+import Control.Exception (catch, finally)
 import Control.Concurrent.STM (STM, atomically)
 import System.Timeout (timeout)
 import Data.Text (Text)
@@ -51,7 +51,7 @@ import HsJupyter.Runtime.ResourceGuard (ResourceViolation(..))
 -- | Add contextual information to error handling operations.
 -- Follows Constitutional Principle VII (Defensive Programming).
 withErrorContext :: Text -> IO (Either e a) -> IO (Either e a)
-withErrorContext context action = do
+withErrorContext _context action = do
   result <- action
   case result of
     Left err -> return $ Left err  -- Error context could be added here if needed
@@ -99,7 +99,7 @@ enrichDiagnostic diag suggestions = diag
 -- | Propagate errors through the diagnostic system.
 -- Standard error propagation pattern.
 propagateError :: GHCError -> RuntimeDiagnostic
-propagateError (CompilationError msg loc suggestions) = mkDiagnostic SeverityError msg
+propagateError (CompilationError msg _ _) = mkDiagnostic SeverityError msg
 propagateError (TimeoutError seconds) = mkError $ "Operation timed out after " <> T.pack (show seconds) <> " seconds"
 propagateError (ImportError modName msg) = mkError $ "Import failed for " <> T.pack modName <> ": " <> msg
 propagateError (RuntimeError msg) = mkError $ "Runtime error: " <> msg
@@ -113,7 +113,7 @@ withResourceCleanup cleanup action = action `finally` cleanup
 -- | Memory limit enforcement with error handling.
 -- Standard memory limiting pattern.
 withMemoryLimit :: Int -> IO (Either GHCError a) -> IO (Either GHCError a)
-withMemoryLimit limitMB action = do
+withMemoryLimit _limitMB action = do
   -- This would integrate with ResourceGuard for actual memory limiting
   -- For now, provide the pattern for consistent usage
   action `catch` \(violation :: ResourceViolation) ->
@@ -130,7 +130,7 @@ withCancellationSupport checkCancelled action = do
 
 -- | Standard timeout error constructor.
 timeoutError :: Int -> Text -> GHCError
-timeoutError seconds operation = TimeoutError seconds
+timeoutError seconds _operation = TimeoutError seconds
 
 -- | Standard cancellation error constructor.
 cancellationError :: Text -> GHCError  

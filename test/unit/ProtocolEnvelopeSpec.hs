@@ -4,6 +4,7 @@ module ProtocolEnvelopeSpec (spec) where
 
 import Data.Aeson (object, (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
 import Test.Hspec
@@ -16,6 +17,7 @@ import HsJupyter.Bridge.Protocol.Envelope
   , ProtocolEnvelope(..)
   , emptyMetadata
   , fromExecuteRequest
+  , signaturePayloadFrom
   , toExecuteReply
   )
 
@@ -52,10 +54,11 @@ sampleEnvelope = do
         [ "code" .= T.pack "print(\"ok\")"
         ]
   pure ProtocolEnvelope
-    { envelopeIdentities = [T.pack "id"]
+    { envelopeIdentities = [BS.pack "id"]
     , envelopeHeader = header
     , envelopeParent = Nothing
     , envelopeMetadata = emptyMetadata
     , envelopeContent = payload
     , envelopeSignature = T.empty
+    , envelopeSignaturePayload = signaturePayloadFrom header Nothing emptyMetadata payload
     }

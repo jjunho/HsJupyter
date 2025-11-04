@@ -21,8 +21,8 @@
 
 **Purpose**: Prepare the development environment.
 
-- [ ] T001 Verify that all dependencies are correctly listed in `hs-jupyter-kernel.cabal`.
-- [ ] T002 [P] Configure a test runner in `cabal.project` to easily execute `hspec` tests.
+- [X] T001 Verify that all dependencies are correctly listed in `hs-jupyter-kernel.cabal`.
+- [X] T002 [P] Configure a test runner in `cabal.project` to easily execute `hspec` tests.
 
 ---
 
@@ -32,8 +32,8 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 Implement the ZMQ socket handling and message (de)serialization in `src/HsJupyter/Bridge/Protocol/Codec.hs`.
-- [ ] T004 Implement the main kernel loop and lifecycle management (startup, shutdown, heartbeat) in `src/HsJupyter/KernelProcess.hs`.
+- [X] T003 Implement the ZMQ socket handling and message (de)serialization in `src/HsJupyter/Bridge/Protocol/Codec.hs`.
+- [X] T004 Implement the main kernel loop and lifecycle management (startup, shutdown, heartbeat) in `src/HsJupyter/KernelProcess.hs`.
 - [ ] T005 Implement the request router for dispatching messages to the correct handlers in `src/HsJupyter/Router/RequestRouter.hs`.
 - [ ] T006 Implement a basic `kernel_info_request` handler to provide kernel metadata.
 
@@ -51,15 +51,18 @@
 
 > **MANDATORY: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T007 [P] [US1] Create an integration test in `test/integration/ExecuteEchoSpec.hs` that sends an `execute_request` and validates the `execute_reply` and `stream` outputs.
+- [X] T007 [P] [US1] Create an integration test in `test/integration/ExecuteEchoSpec.hs` that sends an `execute_request` and validates the `execute_reply` and `stream` outputs.
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Implement the `execute_request` handler in the `RequestRouter` to forward code to the runtime.
-- [ ] T009 [US1] Implement the GHC runtime evaluation logic in `src/HsJupyter/Runtime/Evaluation.hs` to execute the code.
-- [ ] T010 [US1] Ensure that `stdout` and `stderr` are captured and sent back as `stream` messages.
-- [ ] T011 [US1] Ensure the final result is sent back in an `execute_result` message.
-- [ ] T012 [US1] Add structured logging in the execution path for easier debugging.
+- [X] T008 [US1] Implement the `execute_request` handler in the `RequestRouter` to forward code to the runtime.
+- [X] T009 [US1] Implement the GHC runtime evaluation logic in `src/HsJupyter/Runtime/Evaluation.hs` to execute the code.
+- [X] T010 [US1] Ensure that `stdout` and `stderr` are captured and sent back as `stream` messages.
+- [X] T011 [US1] Ensure the final result is sent back in an `execute_result` message.
+- [X] T012 [US1] Add structured logging in the execution path for easier debugging.
+- [X] T014 [US2] Implement the `interrupt_request` handler in `src/HsJupyter/KernelProcess.hs`.
+- [X] T015 [US2] Use STM or async exceptions to gracefully terminate the running computation in the GHC runtime.
+- [X] T016 [US2] Implement the `shutdown_request` handler to support kernel restarts.
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently.
 
@@ -73,7 +76,7 @@
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T013 [P] [US2] Create an integration test that simulates an `interrupt_request` during a long-running execution.
+- [X] T013 [P] [US2] Create an integration test that simulates an `interrupt_request` during a long-running execution.
 
 ### Implementation for User Story 2
 
@@ -89,9 +92,9 @@
 
 **Purpose**: Final improvements and validation.
 
-- [ ] T017 [P] Update `README.md` with any changes to the installation or usage instructions.
-- [ ] T018 Run the `quickstart.md` validation steps to ensure the end-to-end workflow is correct.
-- [ ] T019 Code cleanup and refactoring in the modified modules.
+- [X] T017 [P] Update `README.md` with any changes to the installation or usage instructions.
+- [X] T018 Run the `quickstart.md` validation steps to ensure the end-to-end workflow is correct.
+- [X] T019 Code cleanup and refactoring in the modified modules.
 
 ---
 

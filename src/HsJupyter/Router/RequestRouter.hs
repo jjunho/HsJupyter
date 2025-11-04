@@ -1,113 +1,128 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module HsJupyter.Router.RequestRouter
-  ( Router(..)
-  , RuntimeStreamChunk(..)
-  , mkRouter
-  , routeExecuteRequest
-  , acknowledgeInterrupt
+  ( routeRequest
   ) where
 
-import Data.Aeson (Value, object, (.=))
-import Data.Text (Text)
+import           Control.Monad.IO.Class (liftIO)
+import           Data.Aeson (Value)
+import qualified Data.Aeson as Aeson
+import           Data.Text (Text)
+import qualified Data.Text as T
+import           Katip
 
-import HsJupyter.Bridge.Protocol.Envelope
-  ( ExecuteRequest(..)
-  , ExecuteStatus(..)
-  , InterruptReply(..)
-  , MessageHeader(..)
-  , ProtocolEnvelope(..)
-  )
+import           HsJupyter.Bridge.JupyterBridge (BridgeError (..))
+import           HsJupyter.Bridge.Protocol.Envelope
+import           HsJupyter.Runtime.Manager (RuntimeManager)
+import qualified HsJupyter.Runtime.Manager as RM
+import           HsJupyter.Runtime.SessionState
 
-import HsJupyter.Runtime.Manager
-  ( RuntimeManager
-  , enqueueInterrupt
-  , submitExecute
-  )
-import HsJupyter.Runtime.SessionState
-  ( ExecuteContext(..)
-  , ExecutionOutcome(..)
-  , ExecutionStatus(..)
-  , JobMetadata(..)
-  , StreamChunk(..)
-  , StreamName(..)
-  )
+-- | Main entry point for routing messages from the shell and control channels.
+routeRequest :: (KatipContext m)
+             => RuntimeManager
+             -> ProtocolEnvelope Value
+             -> m (Either BridgeError [ProtocolEnvelope Value])
+routeRequest manager envelope =
+  let hdr = envelopeHeader envelope
+      mtype = msgType hdr
+  in case mtype of
+       "kernel_info_request" -> liftIO $ Right . (:[]) <$> handleKernelInfo manager envelope
+       "execute_request"     -> handleExecuteRequest manager envelope
+       "interrupt_request"   -> liftIO $ Right . (:[]) <$> handleInterrupt manager envelope
+       "shutdown_request"    -> liftIO $ Right . (:[]) <$> handleShutdown manager envelope
+       _                     -> return $ Left (DecodeFailure ("Unsupported message type: " <> mtype))
 
-newtype Router = Router
-  { routerManager :: RuntimeManager
-  }
-
-mkRouter :: RuntimeManager -> Router
-mkRouter = Router
-
-routeExecuteRequest
-  :: Router
-  -> ProtocolEnvelope ExecuteRequest
-  -> IO ExecutionOutcome
-routeExecuteRequest (Router manager) env = do
-  let req = envelopeContent env
-      header = envelopeHeader env
-      ctx = ExecuteContext
-        { ecMessageId = msgId header
-        , ecSessionId = session header
-        , ecUsername  = username header
-        , ecParentId  = msgId <$> envelopeParent env
+handleKernelInfo :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope KernelInfoReply)
+handleKernelInfo _ envelope = do
+  -- In a real implementation, this would query the GHC version, etc.
+  let reply = KernelInfoReply
+        { languageInfo = LanguageInfo
+            { liName = "haskell"
+            , liVersion = "9.2.4" -- TODO: Get from GHC API
+            , liMimetype = "text/x-haskell"
+            , liFileExtension = ".hs"
+            }
+        , protocolVersion = "5.3"
+        , implementation = "hs-jupyter"
+        , implementationVersion = "0.1.0" -- TODO: Get from Cabal
+        , banner = "HsJupyter - A Haskell kernel for Jupyter"
         }
-      metadata = JobMetadata
-        { jmSilent = erSilent req
-        , jmStoreHistory = erStoreHistory req
-        , jmAllowStdin = erAllowStdin req
-        , jmUserExpressions = envelopeMetadata env
+  return $ replyEnvelope envelope "kernel_info_reply" reply
+
+handleExecuteRequest :: (KatipContext m)
+                     => RuntimeManager
+                     -> ProtocolEnvelope Value
+                     -> m (Either BridgeError [ProtocolEnvelope Value])
+handleExecuteRequest manager envelope =
+  case Aeson.fromJSON (envelopeContent envelope) of
+    Aeson.Error err -> return $ Left (DecodeFailure (T.pack err))
+    Aeson.Success (req :: ExecuteRequest) -> do
+      let ctx = ExecuteContext
+            { ecMessageId = msgId (envelopeHeader envelope)
+            , ecSessionId = session (envelopeHeader envelope)
+            , ecUsername  = username (envelopeHeader envelope)
+            , ecParentId  = msgId <$> envelopeParent envelope
+            }
+          metadata = JobMetadata
+            { jmSilent = erSilent req
+            , jmStoreHistory = erStoreHistory req
+            , jmAllowStdin = erAllowStdin req
+            , jmUserExpressions = erUserExpressions req
+            }
+      -- This is where the async execution happens.
+      -- The `submitGHCExecute` function will return immediately, and the
+      -- results will be sent back on the IOPub socket by the runtime manager.
+      liftIO $ RM.submitGHCExecute manager ctx metadata (erCode req)
+      -- The shell socket gets an immediate execute_reply
+      let reply = ExecuteReply
+            { erStatus = "ok"
+            , erExecutionCount = -1 -- The runtime will send the real count
+            , erPayload = []
+            , erUserExpressions = Aeson.object []
+            }
+      return $ Right [replyEnvelope envelope "execute_reply" reply]
+
+handleInterrupt :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope InterruptReply)
+handleInterrupt manager envelope = do
+  RM.enqueueInterrupt manager (msgId (envelopeHeader envelope))
+  return $ replyEnvelope envelope "interrupt_reply" (InterruptReply "ok")
+
+handleShutdown :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope ShutdownReply)
+handleShutdown manager envelope =
+  case Aeson.fromJSON (envelopeContent envelope) of
+    Aeson.Error _ ->
+      -- This shouldn't happen for a valid shutdown request
+      return $ replyEnvelope envelope "shutdown_reply" (ShutdownReply False)
+    Aeson.Success (req :: ShutdownRequest) -> do
+      RM.enqueueShutdown manager (srRestart req)
+      return $ replyEnvelope envelope "shutdown_reply" (ShutdownReply (srRestart req))
+
+-- | Helper to create a reply envelope.
+replyEnvelope :: (Aeson.ToJSON a)
+              => ProtocolEnvelope any
+              -> Text
+              -> a
+              -> ProtocolEnvelope a
+replyEnvelope reqEnv newMsgType content =
+  let reqHdr = envelopeHeader reqEnv
+      newHdr = MessageHeader
+        { identifiers = []
+        , parentHeader = Just reqHdr
+        , metadata = Aeson.object []
+        , msgId = "reply-" <> msgId reqHdr -- TODO: Generate proper UUID
+        , session = session reqHdr
+        , username = username reqHdr
+        , date = date reqHdr -- TODO: Update timestamp
+        , msgType = newMsgType
+        , version = version reqHdr
         }
-  submitExecute manager ctx metadata (erCode req)
-
--- | Convert runtime execution outcome to router-expected format
-data RuntimeExecutionOutcome = RuntimeExecutionOutcome
-  { routerStatus  :: ExecuteStatus
-  , routerPayload :: Value
-  , routerStreams :: [RuntimeStreamChunk]
-  , routerCount   :: Int
-  } deriving (Eq, Show)
-
-data RuntimeStreamChunk = RuntimeStreamChunk
-  { chunkName :: Text
-  , chunkText :: Text
-  } deriving (Eq, Show)
-
-convertOutcome :: ExecutionOutcome -> RuntimeExecutionOutcome
-convertOutcome outcome = RuntimeExecutionOutcome
-  { routerStatus = convertStatus (outcomeStatus outcome)
-  , routerPayload = case outcomePayload outcome of
-      (payload:_) -> payload  -- Take first payload if available
-      [] -> object
-          [ "execution_count" .= outcomeExecutionCount outcome
-          , "status" .= statusText (outcomeStatus outcome)
-          ]
-  , routerStreams = map convertStream (outcomeStreams outcome)
-  , routerCount = outcomeExecutionCount outcome
-  }
-  where
-    convertStatus ExecutionOk = ExecuteOk
-    convertStatus ExecutionError = ExecuteError
-    convertStatus ExecutionAbort = ExecuteError  -- Map abort to error since ExecuteAbort doesn't exist
-    convertStatus ExecutionResourceLimit = ExecuteError
-
-    convertStream (StreamChunk name text) = RuntimeStreamChunk (streamNameToText name) text
-    
-    streamNameToText name = case name of
-      StreamStdout -> "stdout"
-      StreamStderr -> "stderr"
-    
-    statusText ExecutionOk = "ok" :: Text
-    statusText ExecutionError = "error"
-    statusText ExecutionAbort = "abort"
-    statusText ExecutionResourceLimit = "error"
-
--- | Produce an interrupt acknowledgement payload.
-acknowledgeInterrupt
-  :: Router
-  -> ProtocolEnvelope Value
-  -> IO InterruptReply
-acknowledgeInterrupt (Router manager) env = do
-  enqueueInterrupt manager (msgId (envelopeHeader env))
-  pure (InterruptReply "ok")
+  in ProtocolEnvelope
+       { envelopeIdentities = envelopeIdentities reqEnv
+       , envelopeHeader = newHdr
+       , envelopeParent = Just reqHdr
+       , envelopeMetadata = Aeson.object []
+       , envelopeContent = content
+       , envelopeSignature = "" -- The bridge will sign this
+       , envelopeSignaturePayload = undefined -- The bridge will create this
+       }
