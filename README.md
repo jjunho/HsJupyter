@@ -73,7 +73,7 @@ Key modules implemented:
 
 - `HsJupyter.KernelProcess` – process lifecycle and socket management
 - `HsJupyter.Bridge.*` – ZeroMQ bridge, heartbeat, protocol envelopes/codecs
-- `HsJupyter.Router.RequestRouter` – request routing (scaffolded)
+- `HsJupyter.Router` – request routing and message dispatch
 - `HsJupyter.Runtime.*` – runtime manager, GHC session, diagnostics, telemetry
 
 ## CLI Reference

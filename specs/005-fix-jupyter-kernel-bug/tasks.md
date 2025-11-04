@@ -34,8 +34,8 @@
 
 - [X] T003 Implement the ZMQ socket handling and message (de)serialization in `src/HsJupyter/Bridge/Protocol/Codec.hs`.
 - [X] T004 Implement the main kernel loop and lifecycle management (startup, shutdown, heartbeat) in `src/HsJupyter/KernelProcess.hs`.
-- [ ] T005 Implement the request router for dispatching messages to the correct handlers in `src/HsJupyter/Router/RequestRouter.hs`.
-- [ ] T006 Implement a basic `kernel_info_request` handler to provide kernel metadata.
+- [X] T005 Implement the request router for dispatching messages to the correct handlers in `src/HsJupyter/Router.hs`.
+- [X] T006 Implement a basic `kernel_info_request` handler to provide kernel metadata.
 
 **Checkpoint**: Foundation ready - The kernel can start, respond to info requests, and shut down cleanly.
 
