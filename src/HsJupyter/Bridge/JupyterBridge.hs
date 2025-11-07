@@ -11,9 +11,8 @@ module HsJupyter.Bridge.JupyterBridge
   , rejectedCount
   ) where
 
-import Data.Aeson (Value, object, (.=), toJSON)
+import Data.Aeson (Value, object, (.=))
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
-import Data.List (zipWith)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
@@ -27,7 +26,6 @@ import HsJupyter.Bridge.Protocol.Envelope
   , ExecuteStatus(..)
   , InterruptReply(..)
   , KernelInfoReply(..)
-  , KernelInfoRequest
   , MessageHeader(..)
   , ProtocolEnvelope(..)
   , emptyMetadata
@@ -91,18 +89,30 @@ mkBridgeContext cfg manager = do
 rejectedCount :: BridgeContext -> IO Int
 rejectedCount = readIORef . bridgeRejected
 
+-- | Verify signature and handle rejection if invalid (DRY helper)
+withSignatureCheck
+  :: BridgeContext
+  -> ProtocolEnvelope Value
+  -> Text
+  -> IO (Either BridgeError ())
+withSignatureCheck ctx envelope errorMsg = do
+  let sharedKey = key (bridgeConfig ctx)
+  if not (verifySignature sharedKey envelope)
+    then do
+      incrementRejected ctx
+      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn errorMsg
+      pure $ Left SignatureValidationFailed
+    else pure $ Right ()
+
 handleExecuteOnce
   :: BridgeContext
   -> ProtocolEnvelope Value
   -> IO (Either BridgeError [ProtocolEnvelope Value])
 handleExecuteOnce ctx envelope = do
-  let sharedKey = key (bridgeConfig ctx)
-  if not (verifySignature sharedKey envelope)
-    then do
-      incrementRejected ctx
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Rejected envelope with invalid signature"
-      pure $ Left SignatureValidationFailed
-    else case fromExecuteRequest envelope of
+  result <- withSignatureCheck ctx envelope "Rejected envelope with invalid signature"
+  case result of
+    Left err -> pure $ Left err
+    Right () -> case fromExecuteRequest envelope of
       Nothing -> do
         logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Failed to decode execute_request"
         pure $ Left (DecodeFailure "Unsupported content type")
@@ -116,13 +126,10 @@ handleKernelInfo
   -> ProtocolEnvelope Value
   -> IO (Either BridgeError (ProtocolEnvelope Value))
 handleKernelInfo ctx envelope = do
-  let sharedKey = key (bridgeConfig ctx)
-  if not (verifySignature sharedKey envelope)
-    then do
-      incrementRejected ctx
-      logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Rejected kernel_info_request with invalid signature"
-      pure $ Left SignatureValidationFailed
-    else case fromKernelInfoRequest envelope of
+  result <- withSignatureCheck ctx envelope "Rejected kernel_info_request with invalid signature"
+  case result of
+    Left err -> pure $ Left err
+    Right () -> case fromKernelInfoRequest envelope of
       Nothing -> do
         logBridgeEvent (bridgeConfig ctx) (logLevel (bridgeConfig ctx)) LogWarn "Failed to decode kernel_info_request"
         pure $ Left (DecodeFailure "Not a kernel_info_request")

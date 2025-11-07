@@ -119,10 +119,10 @@ renderEnvelopeFrames :: BS.ByteString -> ProtocolEnvelope Value -> [BS.ByteStrin
 renderEnvelopeFrames key env =
   let signatureText = computeSignature key env
       signatureFrame = TE.encodeUtf8 signatureText
-      headerFrame    = LBS.toStrict $ Aeson.encode (envelopeHeader env)
-      parentFrame    = LBS.toStrict $ Aeson.encode (maybe Aeson.Null Aeson.toJSON (envelopeParent env))
-      metadataFrame  = LBS.toStrict $ Aeson.encode (envelopeMetadata env)
-      contentFrame   = LBS.toStrict $ Aeson.encode (envelopeContent env)
+      headerFrame    = canonicalJSON (Aeson.toJSON (envelopeHeader env))
+      parentFrame    = canonicalJSON (maybe Aeson.Null Aeson.toJSON (envelopeParent env))
+      metadataFrame  = canonicalJSON (envelopeMetadata env)
+      contentFrame   = canonicalJSON (envelopeContent env)
       identityFrames = fmap TE.encodeUtf8 (envelopeIdentities env)
   in identityFrames
       ++ [BS.empty, signatureFrame, headerFrame, parentFrame, metadataFrame, contentFrame]
