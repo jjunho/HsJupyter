@@ -49,7 +49,6 @@ import HsJupyter.Kernel.Types
   )
 import HsJupyter.Router.RequestRouter
   ( Router
-  , RuntimeStreamChunk(..)
   , acknowledgeInterrupt
   , mkRouter
   , routeExecuteRequest
@@ -148,21 +147,6 @@ handleKernelInfo ctx envelope = do
             replyEnv = toKernelInfoReply typed reply
             updatedHeader = (envelopeHeader replyEnv) { msgId = newMsgId }
         pure $ Right (replyEnv { envelopeHeader = updatedHeader })
-
-makeStreamEnvelope :: ProtocolEnvelope Value -> RuntimeStreamChunk -> ProtocolEnvelope Value
-makeStreamEnvelope reqEnv (RuntimeStreamChunk name text) =
-  let header = (envelopeHeader reqEnv) { msgType = "stream" }
-  in ProtocolEnvelope
-      { envelopeIdentities = [T.pack "stream"]
-      , envelopeHeader = header
-      , envelopeParent = Just (envelopeHeader reqEnv)
-      , envelopeMetadata = emptyMetadata
-      , envelopeContent = object
-          [ "name" .= name
-          , "text" .= text
-          ]
-      , envelopeSignature = ""
-      }
 
 -- | Produce an interrupt acknowledgement envelope.
 handleInterrupt

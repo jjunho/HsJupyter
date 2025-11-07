@@ -2,21 +2,18 @@
 
 module HsJupyter.Router.RequestRouter
   ( Router(..)
-  , RuntimeStreamChunk(..)
   , mkRouter
   , routeExecuteRequest
   , acknowledgeInterrupt
   ) where
 
-import Data.Aeson (Value, object, (.=))
-import Data.Text (Text)
+import Data.Aeson (Value)
 
 import HsJupyter.Bridge.Protocol.Envelope
-  ( ExecuteRequest(..)
-  , ExecuteStatus(..)
-  , InterruptReply(..)
+  ( InterruptReply(..)
   , MessageHeader(..)
   , ProtocolEnvelope(..)
+  , ExecuteRequest(..)
   )
 
 import HsJupyter.Runtime.Manager
@@ -27,10 +24,7 @@ import HsJupyter.Runtime.Manager
 import HsJupyter.Runtime.SessionState
   ( ExecuteContext(..)
   , ExecutionOutcome(..)
-  , ExecutionStatus(..)
   , JobMetadata(..)
-  , StreamChunk(..)
-  , StreamName(..)
   )
 
 newtype Router = Router
@@ -60,48 +54,6 @@ routeExecuteRequest (Router manager) env = do
         , jmUserExpressions = envelopeMetadata env
         }
   submitExecute manager ctx metadata (erCode req)
-
--- | Convert runtime execution outcome to router-expected format
-data RuntimeExecutionOutcome = RuntimeExecutionOutcome
-  { routerStatus  :: ExecuteStatus
-  , routerPayload :: Value
-  , routerStreams :: [RuntimeStreamChunk]
-  , routerCount   :: Int
-  } deriving (Eq, Show)
-
-data RuntimeStreamChunk = RuntimeStreamChunk
-  { chunkName :: Text
-  , chunkText :: Text
-  } deriving (Eq, Show)
-
-convertOutcome :: ExecutionOutcome -> RuntimeExecutionOutcome
-convertOutcome outcome = RuntimeExecutionOutcome
-  { routerStatus = convertStatus (outcomeStatus outcome)
-  , routerPayload = case outcomePayload outcome of
-      (payload:_) -> payload  -- Take first payload if available
-      [] -> object
-          [ "execution_count" .= outcomeExecutionCount outcome
-          , "status" .= statusText (outcomeStatus outcome)
-          ]
-  , routerStreams = map convertStream (outcomeStreams outcome)
-  , routerCount = outcomeExecutionCount outcome
-  }
-  where
-    convertStatus ExecutionOk = ExecuteOk
-    convertStatus ExecutionError = ExecuteError
-    convertStatus ExecutionAbort = ExecuteError  -- Map abort to error since ExecuteAbort doesn't exist
-    convertStatus ExecutionResourceLimit = ExecuteError
-
-    convertStream (StreamChunk name text) = RuntimeStreamChunk (streamNameToText name) text
-    
-    streamNameToText name = case name of
-      StreamStdout -> "stdout"
-      StreamStderr -> "stderr"
-    
-    statusText ExecutionOk = "ok" :: Text
-    statusText ExecutionError = "error"
-    statusText ExecutionAbort = "abort"
-    statusText ExecutionResourceLimit = "error"
 
 -- | Produce an interrupt acknowledgement payload.
 acknowledgeInterrupt
