@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.6.7'
+        cabal-version: '3.10'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libzmq3-dev pkg-config
+
+    - name: Build release binary
+      run: |
+        cabal update
+        cabal build exe:hs-jupyter-kernel --enable-optimization=2
+        mkdir -p release
+        cp $(cabal list-bin exe:hs-jupyter-kernel) release/hs-jupyter-kernel
+
+    - name: Create tarball
+      run: |
+        cd release
+        tar -czf hs-jupyter-kernel-linux-x86_64.tar.gz hs-jupyter-kernel
+        sha256sum hs-jupyter-kernel-linux-x86_64.tar.gz > hs-jupyter-kernel-linux-x86_64.tar.gz.sha256
+
+    - name: Extract version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/hs-jupyter-kernel-linux-x86_64.tar.gz
+          release/hs-jupyter-kernel-linux-x86_64.tar.gz.sha256
+        body: |
+          ## HsJupyter ${{ steps.get_version.outputs.VERSION }}
+
+          ### Installation
+
+          ```bash
+          # Download and extract
+          wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/hs-jupyter-kernel-linux-x86_64.tar.gz
+          tar -xzf hs-jupyter-kernel-linux-x86_64.tar.gz
+          
+          # Install to PATH
+          sudo cp hs-jupyter-kernel /usr/local/bin/
+          
+          # Install Jupyter kernelspec
+          hs-jupyter-kernel install --user
+          ```
+
+          ### What's Changed
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details.
+
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

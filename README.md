@@ -1,5 +1,9 @@
 # HsJupyter
 
+[![CI](https://github.com/jjunho/HsJupyter/workflows/CI/badge.svg)](https://github.com/jjunho/HsJupyter/actions/workflows/ci.yml)
+[![Release](https://github.com/jjunho/HsJupyter/workflows/Release/badge.svg)](https://github.com/jjunho/HsJupyter/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 HsJupyter is a next-generation Jupyter kernel for the Haskell programming language, implemented natively in Haskell. The project provides a fully functional GHC-powered runtime with persistent evaluation sessions, comprehensive resource management, and protocol-compliant Jupyter integration.
 
 ## Features
