@@ -1,35 +1,62 @@
 # Haskell build artifacts
-/dist/
-/.stack-work/
-/.cabal-sandbox/
-/cabal.project.local
-/.ghc.environment.*
+dist/
+dist-*
+dist-newstyle/
+.stack-work/
+.cabal-sandbox/
+cabal-dev
+cabal.project.local
+cabal.project.local~
+cabal.sandbox.config
+.ghc.environment.*
 .ghci
 .ghci-tmp/
+.HTF/
+.hpc
+.hsenv
+
+# Haskell compiled files
 *.hi
 *.o
+*.chi
+*.chs.h
+*.dyn_o
+*.dyn_hi
+*.hie
 *.eventlog
 *.prof
-dist-newstyle/
+*.aux
+*.hp
 
 # IDE files
-/.vs/
-/.idea/
-/.vscode/
+.vs/
+.idea/
+.vscode/
 *.iml
+.mypy_cache/
 
 # Temporary files
 .tmp/
 *.tmp
 *.swp
+*.swo
 *.bak
+*~
 
 # Python artifacts (for demo scripts)
-/node_modules/
-/tmp/
-/scripts/demo/__pycache__/
+node_modules/
+tmp/
+scripts/demo/__pycache__/
 *.pyc
 __pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.cache/
+
+# Test artifacts
+coverage/
+.coverage
 
 # Logs and runtime files
 *.log
@@ -45,20 +72,6 @@ Thumbs.db
 *.crt
 secrets/
 
-# Test artifacts
-coverage/
-.coverage
-.stack-work/
-*.chi
-*.chs.h
-*.dyn_o
-*.dyn_hi
-*.swo
-*~
-.idea/
-.vscode/
-.mypy_cache/
-.pytest_cache/
-.cache/
-*.egg-info/
-.venv/
+# Debug/dump files
+all.txt
+docs.txt
