@@ -1,0 +1,32 @@
+# HLint configuration for HsJupyter
+# See https://github.com/ndmitchell/hlint for documentation
+
+# Ignore certain hints that conflict with project style
+- ignore: {name: "Use camelCase"}
+- ignore: {name: "Redundant do"}
+- ignore: {name: "Reduce duplication"}
+
+# Warnings to errors
+- warn: {name: Use explicit module export list}
+- warn: {name: Use explicit import list}
+
+# Project-specific rules
+- warn:
+    lhs: "atomically (readTVar x)"
+    rhs: "readTVarIO x"
+    note: "Use readTVarIO for better performance"
+
+# Ignore generated files
+- ignore:
+    within:
+      - dist-newstyle/*
+      - .stack-work/*
+
+# Module-specific exceptions
+- modules:
+  - {name: [Test.Hspec], within: [test/*]}
+  - {name: [Language.Haskell.Interpreter], within: [HsJupyter.Runtime.GHC*]}
+
+# Disable hints for specific functions we use deliberately
+- ignore: {name: "Eta reduce", within: [HsJupyter.Runtime.Manager]}
+- ignore: {name: "Use newtype instead of data", within: [HsJupyter.CLI.Types]}

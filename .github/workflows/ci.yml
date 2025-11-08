@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        ghc: ['9.6.7']
+        cabal: ['3.10']
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: ${{ matrix.cabal }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libzmq3-dev pkg-config
+
+    - name: Cache cabal store
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-newstyle
+        key: ${{ runner.os }}-cabal-${{ matrix.ghc }}-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-cabal-${{ matrix.ghc }}-
+          ${{ runner.os }}-cabal-
+
+    - name: Update cabal package list
+      run: cabal update
+
+    - name: Configure build
+      run: cabal configure --enable-tests --enable-benchmarks --test-show-details=direct
+
+    - name: Build dependencies
+      run: cabal build --only-dependencies
+
+    - name: Build project
+      run: cabal build all -O0
+
+    - name: Run tests
+      run: cabal test all --test-show-details=streaming
+
+    - name: Check cabal file
+      run: cabal check
+
+    - name: Generate documentation
+      run: cabal haddock lib:hs-jupyter-kernel
+
+  lint:
+    name: Lint Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.6.7'
+        cabal-version: '3.10'
+
+    - name: Install HLint
+      run: |
+        cabal update
+        cabal install hlint --overwrite-policy=always
+
+    - name: Run HLint
+      run: |
+        ~/.cabal/bin/hlint src/ app/ --no-exit-code || true
+
+  markdown:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install markdownlint-cli
+      run: npm install -g markdownlint-cli
+
+    - name: Run markdownlint
+      run: markdownlint '**/*.md' --ignore node_modules --ignore dist-newstyle

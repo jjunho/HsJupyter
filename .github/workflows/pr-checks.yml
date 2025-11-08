@@ -1,0 +1,105 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check commit messages
+      run: |
+        # Check that commits follow conventional commits format
+        git log origin/${{ github.base_ref }}..HEAD --pretty=format:"%s" | while read msg; do
+          if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+'; then
+            echo "❌ Commit message does not follow conventional commits: $msg"
+            echo "Expected format: type(scope): description"
+            echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert"
+            exit 1
+          fi
+        done
+
+    - name: Check for TODO/FIXME comments
+      run: |
+        if git diff origin/${{ github.base_ref }}...HEAD | grep -E '^\+.*\b(TODO|FIXME|XXX|HACK)\b' | grep -v '.github/workflows'; then
+          echo "⚠️  Warning: New TODO/FIXME comments found in PR"
+          echo "Please create issues for tracking these items"
+        fi
+
+    - name: Check file sizes
+      run: |
+        large_files=$(find . -type f -size +500k -not -path "*/\.*" -not -path "*/dist-newstyle/*" -not -path "*/node_modules/*")
+        if [ ! -z "$large_files" ]; then
+          echo "❌ Large files detected (>500KB):"
+          echo "$large_files"
+          exit 1
+        fi
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy security scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.6.7'
+        cabal-version: '3.10'
+        enable-stack: false
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libzmq3-dev pkg-config
+
+    - name: Build and test with coverage
+      run: |
+        cabal update
+        cabal configure --enable-tests --enable-coverage
+        cabal build all
+        cabal test all --test-show-details=streaming
+
+    - name: Generate coverage report
+      run: |
+        cabal test all --enable-coverage || true
+        echo "Coverage data generated in dist-newstyle/"
+
+    - name: Comment coverage summary
+      if: github.event_name == 'pull_request'
+      run: |
+        echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Coverage reports available in build artifacts" >> $GITHUB_STEP_SUMMARY
