@@ -33,16 +33,53 @@ Write commit subjects in the imperative mood (`Add runtime manager sketch`) and 
 Codex agents must follow the Specify toolkit prompts before running `/speckit` commands: review the matching files in `.codex/prompts/` (`speckit.specify.md`, `speckit.plan.md`, `speckit.tasks.md`, `speckit.implement.md`) and apply their checklists verbatim. Always invoke the helper scripts under `.specify/scripts/bash/` from the repo root with the documented flags, keep feature branches numbered (`001-name`), and update generated checklists when validation status changes.
 
 ## Active Technologies
-- Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
-- filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
 
-- Haskell with GHC 9.12.2 via ghcup + hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm (003-ghc-evaluation)
-- In-memory interpreter state (hint InterpreterT monad) (003-ghc-evaluation)
+- **Haskell with GHC 9.6.7+** via ghcup
+- **Core Libraries**: hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm, cryptonite
+- **Testing**: hspec >= 2.10 for unit and integration tests
+- **Concurrency**: STM for job queues and cancellation tokens
+- **Logging**: katip for structured observability
+- **Persistence**: In-memory interpreter state via hint InterpreterT monad
+- **Protocol**: ZeroMQ sockets with HMAC-SHA256 authentication
+- **Build System**: Cabal 3.0+ with optimized build flags
 
-- Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging (001-protocol-bridge)
-- Python helper script powered by `pyzmq` for local execute demos (001-protocol-bridge)
-- N/A (in-memory runtime stub only) (001-protocol-bridge)
+### Phase-Specific Technologies
+
+- **001-protocol-bridge**: zeromq4-haskell, aeson, bytestring/text, katip, cryptonite for HMAC
+- **002-runtime-core**: STM-based concurrency, ResourceGuard with RTS statistics, session state management
+- **003-ghc-evaluation**: hint library for GHC integration, TMVar-based cancellation, memory monitoring
+- **004-install-cli**: optparse-applicative for CLI parsing, directory/filepath for system integration, unix for platform support
 
 ## Recent Changes
 
-- 001-protocol-bridge: Added Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging
+### Phase 4: Installation CLI (004-install-cli) - In Progress
+
+- Added CLI command infrastructure with Commands.hs, Types.hs
+- Implemented configuration management (Configuration.hs)
+- Added utility functions (Utilities.hs, Output.hs)
+- Started Install.hs and Doctor.hs implementation
+
+### Phase 3: GHC Evaluation (003-ghc-evaluation) - Complete
+
+- Full Haskell evaluation with hint library
+- Persistent GHC sessions with variable/function persistence
+- Module import system with security policies
+- Comprehensive error handling with 5 syntax error types
+- TMVar-based cancellation infrastructure
+- ResourceGuard integration with memory/CPU monitoring
+- Performance telemetry and metrics collection
+
+### Phase 2: Runtime Core (002-runtime-core) - Complete
+
+- STM-based job queue with cancellation support
+- Session state management across cell executions
+- Resource limits enforcement (memory, CPU, output)
+- Diagnostics and telemetry system
+- Job registry with TMVar tokens
+
+### Phase 1: Protocol Bridge (001-protocol-bridge) - Complete
+
+- ZeroMQ socket management for all 5 channels
+- HMAC-SHA256 signature validation
+- Protocol envelope parsing and codec implementation
+- Heartbeat thread for kernel health monitoring
