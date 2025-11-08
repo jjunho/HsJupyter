@@ -27,13 +27,11 @@ module HsJupyter.Runtime.GHCSession
   ) where
 
 import Control.Concurrent.STM
-import Control.Monad.IO.Class
 import Data.List (isPrefixOf, isInfixOf)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Language.Haskell.Interpreter (Interpreter, InterpreterT, runInterpreter)
 
 import HsJupyter.Runtime.SessionState (ResourceBudget)
 

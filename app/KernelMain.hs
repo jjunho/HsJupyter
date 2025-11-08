@@ -47,13 +47,13 @@ kernelOptionsParser = KernelOptions
 -- | Execute CLI commands
 executeCLICommand :: CLICommand -> IO ()
 executeCLICommand cmd = case cmd of
-  InstallCommand globalOpts installOpts -> do
+  InstallCommand _globalOpts installOpts -> do
     result <- executeInstall installOpts
     case result of
       Left err -> die $ "Installation failed: " ++ show err
       Right _ -> putStrLn "Installation completed successfully"
       
-  DoctorCommand globalOpts doctorOpts -> do
+  DoctorCommand globalOpts _doctorOpts -> do
     result <- executeDiagnostics globalOpts
     case result of
       Left err -> die $ "Diagnostics failed: " ++ show err

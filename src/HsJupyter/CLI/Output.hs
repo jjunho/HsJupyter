@@ -36,7 +36,7 @@ module HsJupyter.CLI.Output
     , writeOutputFile
     ) where
 
-import Data.Aeson (Value(..), ToJSON(..), (.=), object, encode)
+import Data.Aeson (Value(..), ToJSON(..), (.=), object)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as Key
@@ -45,18 +45,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.ByteString.Lazy.Char8 as L8
-import System.IO (Handle, stdout, stderr, hPutStrLn)
+import System.IO (hPutStrLn, stderr)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 
 import HsJupyter.CLI.Types
     ( CLIDiagnostic(..)
     , DiagnosticResult(..)
     , KernelInstallation(..)
-    , HealthStatus(..)
     , Issue(..)
-    , Recommendation(..)
-    , Severity(..)
-    , Priority(..)
     )
 
 -- | Output format specification

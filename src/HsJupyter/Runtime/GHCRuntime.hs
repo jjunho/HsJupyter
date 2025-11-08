@@ -349,7 +349,7 @@ evaluateExpressionMemoryLimited session code = do
 evaluateExpressionGuarded :: GHCSessionState -> Text -> IO (Either GHCError Text)
 evaluateExpressionGuarded session code = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \guard -> do
+  result <- withResourceGuard resourceLims $ \_guard -> do
     token <- atomically newCancellationToken
     evaluateExpressionCancellable session code token
       `catch` \(violation :: ResourceViolation) -> 
@@ -426,7 +426,7 @@ evaluateDeclarationMemoryLimited session code = do
 evaluateDeclarationGuarded :: GHCSessionState -> Text -> IO (Either GHCError [String])
 evaluateDeclarationGuarded session code = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \guard -> do
+  result <- withResourceGuard resourceLims $ \_guard -> do
     token <- atomically newCancellationToken
     evaluateDeclarationCancellable session code token
       `catch` \(violation :: ResourceViolation) ->
@@ -494,7 +494,7 @@ importModuleMemoryLimited session importStatement = do
 importModuleGuarded :: GHCSessionState -> String -> IO (Either GHCError ())
 importModuleGuarded session importStatement = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \guard -> do
+  result <- withResourceGuard resourceLims $ \_guard -> do
     token <- atomically newCancellationToken
     importModuleCancellable session importStatement token
       `catch` \(violation :: ResourceViolation) ->
@@ -509,7 +509,7 @@ importModuleCancellable session importStatement token = do
     Left err -> return $ Left (ImportError "invalid" (T.pack err))
     Right () -> do
       -- Parse import statement to extract module name
-      let (moduleName, isQualified) = parseImportStatement importStatement
+      let (moduleName, _isQualified) = parseImportStatement importStatement
       
       -- Check if module is allowed by policy
       policyCheck <- atomically $ checkImportPolicy session moduleName
@@ -595,13 +595,9 @@ parseImportStatementFull stmt =
     ["import", moduleName, "as", alias] -> 
       ImportStatement moduleName False (Just alias) Nothing
     -- import ModuleName (selective imports)
-    ("import":moduleName:rest) -> 
+    ("import":moduleName:rest) | not (null rest) -> 
       let (selective, alias) = parseSelectiveAndAlias (unwords rest)
       in ImportStatement moduleName False alias selective
-    -- import qualified ModuleName (selective imports)
-    ("import":"qualified":moduleName:rest) -> 
-      let (selective, alias) = parseSelectiveAndAlias (unwords rest)
-      in ImportStatement moduleName True alias selective
     -- Just the module name (assume simple import)
     [moduleName] -> 
       ImportStatement moduleName False Nothing Nothing
