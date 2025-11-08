@@ -33,7 +33,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (ToJSON(..), (.=), object)
 import qualified Data.Aeson as A
-import Data.Maybe (fromMaybe, isJust, catMaybes)
 import Data.Time.Clock (getCurrentTime, UTCTime)
 
 -- Constitutional integration

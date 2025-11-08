@@ -3,7 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 -- | CLI Install module - handles kernel installation commands and operations
-module HsJupyter.CLI.Install 
+module HsJupyter.CLI.Install
   ( executeInstall
   , detectJupyterEnvironment
   , validateJupyterEnvironment
@@ -50,10 +50,10 @@ module HsJupyter.CLI.Install
 import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad (filterM, when)
-import Control.Exception (try, IOException, SomeException, catch, finally)
-import qualified Control.Exception
+import Control.Exception (try, IOException, SomeException, catch)
+import qualified Control.Exception as E
 import qualified System.Timeout
-import System.Directory 
+import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
   , doesFileExist
@@ -68,10 +68,9 @@ import System.Directory
   )
 import System.FilePath ((</>), takeDirectory)
 import System.Environment (lookupEnv, getExecutablePath)
-import Data.Aeson 
+import Data.Aeson
   ( Value(..)
   , Object
-  , Array
   , (.=)
   , object
   , encode
@@ -85,20 +84,17 @@ import Data.Maybe (fromMaybe)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Time (getCurrentTime)
-import Control.Monad (when)
-import System.Environment (lookupEnv)
+
 
 -- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
-import HsJupyter.Runtime.ResourceGuard 
-  ( ResourceGuard
-  , ResourceLimits(..)  
+import HsJupyter.Runtime.ResourceGuard
+  ( ResourceLimits(..)
   , withResourceGuard
   , defaultResourceLimits
   , ResourceViolation(..)
   )
 import HsJupyter.Runtime.ErrorHandling
   ( withErrorContext
-  , enrichDiagnostic
   )
 
 -- T037: Command output formatting imports
@@ -106,24 +102,17 @@ import HsJupyter.CLI.Output (formatOutput, OutputFormat(..))
 import HsJupyter.CLI.Commands (ListOptions(..), VersionOptions(..), UninstallOptions(..))
 
 -- T020: Structured logging integration following constitutional patterns
-import HsJupyter.Runtime.Telemetry 
+import HsJupyter.Runtime.Telemetry
   ( RuntimeMetric(..)
   , emitMetric
   )
 import qualified Data.Aeson as A
-import qualified Data.Aeson.Key as K
-import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.IO (stdout, hPutStrLn)
-import Control.Monad.IO.Class (liftIO)
-import qualified Data.Text as T
 
 -- T021: Cancellation support imports
-import Control.Concurrent.STM (STM, TMVar, newTMVarIO, takeTMVar, putTMVar, readTMVar, atomically)
-import Control.Concurrent.Async (async, cancel, wait, race_)
-import Control.Concurrent (threadDelay)
-import Control.Exception (bracket, SomeException)
+import Control.Concurrent.STM (TMVar, newTMVarIO, takeTMVar, putTMVar, readTMVar, atomically)
 
-import HsJupyter.CLI.Types 
+import HsJupyter.CLI.Types
   ( InstallScope(..)
   , CLIDiagnostic(..)
   , JupyterEnvironment(..)
@@ -135,7 +124,7 @@ import HsJupyter.CLI.Types
   , iSeverity, iComponent, iDescription, iDetails
   , Severity(..)
   , Component(..)
-  , KernelConfig(..) 
+  , KernelConfig(..)
   , kcResourceLimits, kcDisplayName, kcLanguage, kcInterruptMode, kcMetadata
   , InterruptMode(..)
   , InstallationStatus(..)
@@ -154,29 +143,29 @@ import qualified HsJupyter.CLI.Utilities as Utilities
 -- | List all HsJupyter kernel installations
 listKernelInstallations :: ListOptions -> IO (Either CLIDiagnostic [KernelInstallation])
 listKernelInstallations options = withErrorContext "list-kernel-installations" $ do
-  logCLIOperation "list" "Starting kernel installation discovery" 
+  logCLIOperation "list" "Starting kernel installation discovery"
     [("show_all", A.Bool $ loShowAll options)]
-  
+
   -- Discover kernelspec directories
   kernelspecDirs <- case loSearchPath options of
     Just customPath -> return [customPath]
     Nothing -> do
       result <- findKernelspecDirectories
       case result of
-        Left diag -> return []
+        Left _diag -> return []
         Right dirs -> return dirs
-  
+
   -- Scan for HsJupyter installations in each directory
   allInstallations <- scanDirectoriesForInstallations kernelspecDirs
-  
+
   -- Filter results based on options
   let filteredInstallations = if loShowAll options
         then allInstallations
         else filterFunctionalInstallations allInstallations
-  
+
   logCLIOperation "list" "Kernel installation discovery completed"
     [("total_found", A.Number $ fromIntegral $ length filteredInstallations)]
-  
+
   return $ Right filteredInstallations
 
 -- | Scan directories for HsJupyter kernel installations
@@ -189,7 +178,7 @@ scanDirectoriesForInstallations dirs = do
 scanDirectoryForInstallations :: FilePath -> IO [KernelInstallation]
 scanDirectoryForInstallations kernelspecDir = do
   logCLIOperation "scan" ("Scanning directory: " ++ kernelspecDir) []
-  
+
   -- Check if directory exists
   exists <- doesDirectoryExist kernelspecDir
   if not exists
@@ -200,7 +189,7 @@ scanDirectoryForInstallations kernelspecDir = do
         entries <- listDirectory kernelspecDir
         validInstallations <- filterM (isHsJupyterKernel kernelspecDir) entries
         mapM (loadKernelInstallation kernelspecDir) validInstallations
-      
+
       case result of
         Left (_ :: IOException) -> return []
         Right installations -> return $ concat installations
@@ -217,20 +206,20 @@ isHsJupyterKernel kernelspecDir kernelName = do
       result <- try $ LBS.readFile kernelJsonPath
       case result of
         Left (_ :: IOException) -> return False
-        Right content -> 
+        Right content ->
           case eitherDecode content of
             Left _ -> return False
             Right (kernelJson :: Value) -> return $ isHsJupyterKernelJson kernelJson
 
 -- | Check if kernel.json indicates HsJupyter kernel
 isHsJupyterKernelJson :: Value -> Bool
-isHsJupyterKernelJson (Object obj) = 
+isHsJupyterKernelJson (Object obj) =
   case KM.lookup (K.fromText "argv") obj of
-    Just (Array argv) -> 
+    Just (Array argv) ->
       any containsHsJupyterMarker (V.toList argv)
     _ -> False
   where
-    containsHsJupyterMarker (String text) = 
+    containsHsJupyterMarker (String text) =
       "hs-jupyter-kernel" `T.isInfixOf` text
     containsHsJupyterMarker _ = False
 isHsJupyterKernelJson _ = False
@@ -239,18 +228,18 @@ isHsJupyterKernelJson _ = False
 loadKernelInstallation :: FilePath -> String -> IO [KernelInstallation]
 loadKernelInstallation kernelspecDir kernelName = do
   let kernelJsonPath = kernelspecDir </> kernelName </> "kernel.json"
-  
+
   result <- try $ do
     content <- LBS.readFile kernelJsonPath
     case eitherDecode content of
-      Left parseError -> 
+      Left parseError ->
         return [corruptedInstallation kernelJsonPath $ "Parse error: " <> T.pack parseError]
       Right kernelJson -> do
         installation <- parseKernelInstallation kernelJsonPath kernelJson
         return [installation]
-  
+
   case result of
-    Left (_ :: IOException) -> 
+    Left (_ :: IOException) ->
       return [corruptedInstallation kernelJsonPath "Cannot read kernel.json"]
     Right installations -> return installations
 
@@ -262,10 +251,10 @@ parseKernelInstallation kernelJsonPath kernelJson = do
       version = extractKernelVersion kernelJson
       ghcPath = extractGHCPathFromKernel kernelJson
       kernelConfig = extractKernelConfiguration kernelJson
-  
+
   -- Determine installation status
   status <- determineInstallationStatus kernelJsonPath ghcPath
-  
+
   return KernelInstallation
     { kiKernelspecPath = kernelJsonPath
     , kiDisplayName = displayName
@@ -277,7 +266,7 @@ parseKernelInstallation kernelJsonPath kernelJson = do
 
 -- | Extract display name from kernel.json
 extractKernelDisplayName :: Value -> Text
-extractKernelDisplayName (Object obj) = 
+extractKernelDisplayName (Object obj) =
   case KM.lookup (K.fromText "display_name") obj of
     Just (String name) -> name
     _ -> "Unknown"
@@ -285,9 +274,9 @@ extractKernelDisplayName _ = "Unknown"
 
 -- | Extract version from kernel.json metadata
 extractKernelVersion :: Value -> Text
-extractKernelVersion (Object obj) = 
+extractKernelVersion (Object obj) =
   case KM.lookup (K.fromText "metadata") obj of
-    Just (Object metadata) -> 
+    Just (Object metadata) ->
       case KM.lookup (K.fromText "kernel_version") metadata of
         Just (String version) -> version
         _ -> "0.1.0.0"
@@ -296,9 +285,9 @@ extractKernelVersion _ = "0.1.0.0"
 
 -- | Extract GHC path from kernel environment
 extractGHCPathFromKernel :: Value -> FilePath
-extractGHCPathFromKernel (Object obj) = 
+extractGHCPathFromKernel (Object obj) =
   case KM.lookup (K.fromText "env") obj of
-    Just (Object env) -> 
+    Just (Object env) ->
       case KM.lookup (K.fromText "GHC_PATH") env of
         Just (String path) -> T.unpack path
         _ -> "/usr/bin/ghc"
@@ -307,7 +296,7 @@ extractGHCPathFromKernel _ = "/usr/bin/ghc"
 
 -- | Extract kernel configuration from kernel.json
 extractKernelConfiguration :: Value -> KernelConfig
-extractKernelConfiguration (Object obj) = 
+extractKernelConfiguration (Object obj) =
   let displayName = extractKernelDisplayName (Object obj)
       language = case KM.lookup (K.fromText "language") obj of
         Just (String lang) -> lang
@@ -326,7 +315,7 @@ extractKernelConfiguration (Object obj) =
     , kcInterruptMode = interruptMode
     , kcMetadata = metadata
     }
-extractKernelConfiguration _ = 
+extractKernelConfiguration _ =
   KernelConfig (HsJupyter.CLI.Types.ResourceLimits Nothing Nothing Nothing) "Unknown" "haskell" Signal (object [])
 
 -- | Determine installation status based on file system checks
@@ -334,10 +323,10 @@ determineInstallationStatus :: FilePath -> FilePath -> IO InstallationStatus
 determineInstallationStatus kernelJsonPath ghcPath = do
   -- Check if kernel.json is readable and valid
   kernelJsonValid <- doesFileExist kernelJsonPath
-  
+
   -- Check if GHC path is accessible
   ghcValid <- doesFileExist ghcPath
-  
+
   case (kernelJsonValid, ghcValid) of
     (True, True) -> return Installed
     (True, False) -> return $ InstalledWithIssues [ghcNotFoundIssue ghcPath]
@@ -358,7 +347,7 @@ corruptedInstallation kernelJsonPath reason = KernelInstallation
 filterFunctionalInstallations :: [KernelInstallation] -> [KernelInstallation]
 filterFunctionalInstallations = filter isFunctionalInstallation
   where
-    isFunctionalInstallation installation = 
+    isFunctionalInstallation installation =
       case kiStatus installation of
         Installed -> True
         InstalledWithIssues _ -> True  -- Still functional, just has issues
@@ -385,15 +374,15 @@ kernelJsonCorruptedIssue kernelJsonPath = Issue
 -- | Get version information for HsJupyter kernel
 getVersionInformation :: VersionOptions -> IO (Either CLIDiagnostic (Text, Text))
 getVersionInformation options = withErrorContext "version-information" $ do
-  logCLIOperation "version" "Retrieving version information" 
+  logCLIOperation "version" "Retrieving version information"
     [("check_compatibility", A.Bool $ voCheckCompatibility options)]
-  
+
   -- Get kernel version from executable
   kernelVersion <- getKernelVersion
-  
+
   -- Get build information
   buildInfo <- getBuildInformation
-  
+
   -- Check compatibility if requested
   if voCheckCompatibility options
     then do
@@ -442,9 +431,9 @@ executeUninstall opts format = do
 -- | Uninstall HsJupyter kernel with optional cleanup verification
 uninstallKernel :: UninstallOptions -> IO (Either CLIDiagnostic UninstallResult)
 uninstallKernel options = withErrorContext "uninstall-kernel" $ do
-  logCLIOperation "uninstall" "Starting kernel uninstallation" 
+  logCLIOperation "uninstall" "Starting kernel uninstallation"
     [("force", A.Bool $ uoForce options), ("cleanup_all", A.Bool $ uoCleanupAll options)]
-  
+
   -- Discover existing installations
   installationsResult <- listKernelInstallations (defaultListOptionsForUninstall options)
   case installationsResult of
@@ -456,12 +445,12 @@ uninstallKernel options = withErrorContext "uninstall-kernel" $ do
           -- Uninstall each installation
           uninstallResults <- mapM (uninstallSingleInstallation options) installations
           let (errors, successes) = partitionResults uninstallResults
-          
+
           -- Perform cleanup if requested
           cleanupResult <- if uoCleanupAll options
             then performGlobalCleanup options
             else return $ Right []
-          
+
           case cleanupResult of
             Left cleanupDiag -> return $ Left cleanupDiag
             Right cleanupActions -> do
@@ -469,17 +458,17 @@ uninstallKernel options = withErrorContext "uninstall-kernel" $ do
                   totalErrors = length errors
                   summaryMsg = T.pack $ "Uninstalled " ++ show totalSuccesses ++ " kernel(s)"
                   finalResult = UninstallResult (successes ++ cleanupActions) summaryMsg
-              
+
               logCLIOperation "uninstall" "Kernel uninstallation completed"
                 [("total_uninstalled", A.Number $ fromIntegral totalSuccesses)
                 ,("total_errors", A.Number $ fromIntegral totalErrors)]
-              
+
               if null errors
                 then return $ Right finalResult
                 else return $ Left $ InstallationError $ combineIssues errors
 
 -- | Create ListOptions for uninstall discovery
-defaultListOptionsForUninstall :: UninstallOptions -> ListOptions  
+defaultListOptionsForUninstall :: UninstallOptions -> ListOptions
 defaultListOptionsForUninstall uninstallOpts = ListOptions
   { loShowAll = True  -- Show all installations, including problematic ones
   , loSearchPath = uoKernelspecDir uninstallOpts  -- Use specified search path if any
@@ -491,30 +480,30 @@ uninstallSingleInstallation options installation = do
   let kernelspecPath = kiKernelspecPath installation
       kernelName = extractKernelNameFromPath kernelspecPath
       installationDir = takeDirectory kernelspecPath
-  
-  logCLIOperation "uninstall-single" ("Uninstalling: " ++ kernelName) 
+
+  logCLIOperation "uninstall-single" ("Uninstalling: " ++ kernelName)
     [("kernelspec_path", A.String $ T.pack kernelspecPath)]
-  
+
   -- Check if we should force removal even if there are issues
   let shouldRemove = uoForce options || isRemovableInstallation installation
-  
+
   if not shouldRemove && not (uoForce options)
-    then return $ Left $ Issue Minor KernelComponent "Skipped problematic installation (use --force to remove)" 
+    then return $ Left $ Issue Minor KernelComponent "Skipped problematic installation (use --force to remove)"
            (Just $ "Installation at " <> T.pack kernelspecPath <> " has issues")
     else do
       -- Attempt to remove the kernelspec directory
       removeResult <- try $ removeDirectoryRecursive installationDir
       case removeResult of
-        Left (_ :: IOException) -> 
-          return $ Left $ Issue Major KernelComponent "Failed to remove kernelspec directory" 
+        Left (_ :: IOException) ->
+          return $ Left $ Issue Major KernelComponent "Failed to remove kernelspec directory"
             (Just $ "Could not remove " <> T.pack installationDir)
         Right _ -> do
           -- Verify removal was successful
           stillExists <- doesDirectoryExist installationDir
           if stillExists
-            then return $ Left $ Issue Major KernelComponent "Directory removal incomplete" 
+            then return $ Left $ Issue Major KernelComponent "Directory removal incomplete"
                    (Just $ "Directory still exists: " <> T.pack installationDir)
-            else return $ Right $ UninstallAction 
+            else return $ Right $ UninstallAction
               { uaType = RemoveKernelspec
               , uaTarget = T.pack installationDir
               , uaResult = "Successfully removed"
@@ -522,7 +511,7 @@ uninstallSingleInstallation options installation = do
 
 -- | Check if installation is safe to remove
 isRemovableInstallation :: KernelInstallation -> Bool
-isRemovableInstallation installation = 
+isRemovableInstallation installation =
   case kiStatus installation of
     Installed -> True
     InstalledWithIssues _ -> True
@@ -531,7 +520,7 @@ isRemovableInstallation installation =
 
 -- | Extract kernel name from kernelspec path
 extractKernelNameFromPath :: FilePath -> String
-extractKernelNameFromPath kernelspecPath = 
+extractKernelNameFromPath kernelspecPath =
   let pathComponents = splitDirectories kernelspecPath
   in if length pathComponents >= 2
      then pathComponents !! (length pathComponents - 2)  -- Parent directory of kernel.json
@@ -543,23 +532,23 @@ splitDirectories path = filter (not . null) $ splitOn "/" (normalise path)
   where
     splitOn :: Eq a => [a] -> [a] -> [[a]]
     splitOn _ [] = []
-    splitOn delim str = 
+    splitOn delim str =
       let (chunk, rest) = breakOn delim str
       in chunk : case rest of
                    [] -> []
                    _:xs -> splitOn delim xs
-    
+
     breakOn :: Eq a => [a] -> [a] -> ([a], [a])
     breakOn _ [] = ([], [])
     breakOn delim str@(x:xs)
       | delim `isPrefixOf` str = ([], str)
       | otherwise = let (chunk, rest) = breakOn delim xs in (x:chunk, rest)
-    
+
     isPrefixOf :: Eq a => [a] -> [a] -> Bool
     isPrefixOf [] _ = True
     isPrefixOf _ [] = False
     isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
-    
+
     normalise :: FilePath -> FilePath
     normalise = id  -- Simplified for this context
 
@@ -567,13 +556,13 @@ splitDirectories path = filter (not . null) $ splitOn "/" (normalise path)
 performGlobalCleanup :: UninstallOptions -> IO (Either CLIDiagnostic [UninstallAction])
 performGlobalCleanup options = withErrorContext "global-cleanup" $ do
   logCLIOperation "cleanup" "Performing global cleanup" []
-  
+
   cleanupActions <- sequence
     [ cleanupTemporaryFiles
     , cleanupConfigurationFiles options
     , cleanupLogFiles options
     ]
-  
+
   let (errors, actions) = partitionResults cleanupActions
   if null errors
     then return $ Right $ concat actions
@@ -584,38 +573,38 @@ cleanupTemporaryFiles :: IO (Either Issue [UninstallAction])
 cleanupTemporaryFiles = do
   tempDir <- getTemporaryDirectory
   let hsJupyterTempDir = tempDir </> "hs-jupyter"
-  
+
   exists <- doesDirectoryExist hsJupyterTempDir
   if not exists
     then return $ Right []
     else do
       result <- try $ removeDirectoryRecursive hsJupyterTempDir
       case result of
-        Left (_ :: IOException) -> 
+        Left (_ :: IOException) ->
           return $ Left $ Issue Minor SystemComponent "Failed to cleanup temporary files"
             (Just $ "Could not remove " <> T.pack hsJupyterTempDir)
-        Right _ -> 
+        Right _ ->
           return $ Right [UninstallAction CleanupTemp (T.pack hsJupyterTempDir) "Cleaned up temporary files"]
 
 -- | Cleanup configuration files if requested
 cleanupConfigurationFiles :: UninstallOptions -> IO (Either Issue [UninstallAction])
-cleanupConfigurationFiles options = 
+cleanupConfigurationFiles options =
   if not (uoRemoveConfig options)
     then return $ Right []
     else do
       homeDir <- getHomeDirectory
       let configDir = homeDir </> ".hs-jupyter"
-      
+
       exists <- doesDirectoryExist configDir
       if not exists
         then return $ Right []
         else do
           result <- try $ removeDirectoryRecursive configDir
           case result of
-            Left (_ :: IOException) -> 
+            Left (_ :: IOException) ->
               return $ Left $ Issue Minor SystemComponent "Failed to cleanup configuration files"
                 (Just $ "Could not remove " <> T.pack configDir)
-            Right _ -> 
+            Right _ ->
               return $ Right [UninstallAction CleanupConfig (T.pack configDir) "Removed configuration files"]
 
 -- | Cleanup log files if requested  
@@ -626,26 +615,26 @@ cleanupLogFiles options =
     else do
       homeDir <- getHomeDirectory
       let logDir = homeDir </> ".local" </> "share" </> "hs-jupyter" </> "logs"
-      
+
       exists <- doesDirectoryExist logDir
       if not exists
         then return $ Right []
         else do
           result <- try $ removeDirectoryRecursive logDir
           case result of
-            Left (_ :: IOException) -> 
+            Left (_ :: IOException) ->
               return $ Left $ Issue Minor SystemComponent "Failed to cleanup log files"
                 (Just $ "Could not remove " <> T.pack logDir)
-            Right _ -> 
+            Right _ ->
               return $ Right [UninstallAction CleanupLogs (T.pack logDir) "Removed log files"]
 
 -- | Partition Either results into errors and successes
 partitionResults :: [Either a b] -> ([a], [b])
 partitionResults [] = ([], [])
-partitionResults (Left err : rest) = 
+partitionResults (Left err : rest) =
   let (errors, successes) = partitionResults rest
   in (err : errors, successes)
-partitionResults (Right success : rest) = 
+partitionResults (Right success : rest) =
   let (errors, successes) = partitionResults rest
   in (errors, success : successes)
 
@@ -653,7 +642,7 @@ partitionResults (Right success : rest) =
 combineIssues :: [Issue] -> Issue
 combineIssues [] = Issue Minor SystemComponent "Unknown error" Nothing
 combineIssues [issue] = issue
-combineIssues issues = 
+combineIssues issues =
   let maxSeverity = maximum $ map iSeverity issues
       issueDescriptions = map iDescription issues
       combinedDescription = "Multiple issues: " <> T.intercalate "; " issueDescriptions
@@ -702,11 +691,11 @@ withCLIResourceError operation action = do
 
 -- | CLI-specific resource cleanup pattern
 withCLIResourceCleanup :: IO () -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
-withCLIResourceCleanup cleanup action = 
+withCLIResourceCleanup cleanup action =
   action `finally` cleanup
   where
     finally :: IO a -> IO b -> IO a
-    finally = Control.Exception.finally
+    finally = E.finally
 
 -- | CLI-specific timeout wrapper for operations
 withCLITimeout :: Int -> Text -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
@@ -743,18 +732,18 @@ logCLIOperation operation details fields = do
   hPutStrLn stdout $ "[CLI] " ++ operation ++ ": " ++ details
 
 -- | Log installation step with structured context
-logInstallStep :: String -> String -> [(String, A.Value)] -> IO ()  
-logInstallStep step msg context = 
+logInstallStep :: String -> String -> [(String, A.Value)] -> IO ()
+logInstallStep step msg context =
   logCLIOperation "install_step" msg (("step", A.String (T.pack step)) : context)
 
 -- | Log installation error with structured context
 logInstallError :: String -> String -> [(String, A.Value)] -> IO ()
-logInstallError step errorMsg context = 
+logInstallError step errorMsg context =
   logCLIOperation "install_error" errorMsg (("step", A.String (T.pack step)) : ("error", A.Bool True) : context)
 
 -- | Log installation success with metrics
 logInstallSuccess :: String -> [(String, A.Value)] -> IO ()
-logInstallSuccess msg context = 
+logInstallSuccess msg context =
   logCLIOperation "install_success" msg (("success", A.Bool True) : context)
 
 -- ===========================================================================
@@ -781,7 +770,7 @@ cancelOperation token = do
   logCLIOperation "cancellation" "Operation cancellation requested" [("component", A.String "cancellation")]
   -- Set cancellation flag if not already set
   atomically $ do
-    cancelled <- takeTMVar (ctCancelled token)
+    _cancelled <- takeTMVar (ctCancelled token)
     putTMVar (ctCancelled token) True
   -- Execute cleanup actions in reverse order (LIFO)
   cleanupActions <- atomically $ readTMVar (ctCleanupActions token)
@@ -818,12 +807,12 @@ withCancellation token operation = do
 -- | Execute kernel installation with cancellation support (T021 enhancement)
 executeInstallWithCancellation :: InstallOptions -> CancellationToken -> IO (Either CLIDiagnostic ())
 executeInstallWithCancellation options token = do
-  logCLIOperation "install_with_cancellation" "Starting cancellable installation" 
+  logCLIOperation "install_with_cancellation" "Starting cancellable installation"
     [("scope", A.String $ T.pack $ show $ ioScope options)]
-  
+
   -- Add cleanup actions for potential cancellation
   addCleanupAction token $ logCLIOperation "cleanup" "Installation cleanup triggered" []
-  
+
   -- Execute installation with cancellation support
   withCancellation token (executeInstall options) >>= \case
     Left diag -> return $ Left diag
@@ -836,26 +825,26 @@ executeInstallWithCancellation options token = do
 executeInstall :: InstallOptions -> IO (Either CLIDiagnostic ())
 executeInstall options = withErrorContext "kernel-installation" $ do
   -- T020: Log installation start with options  
-  logInstallStep "initialize" "Starting kernel installation" 
+  logInstallStep "initialize" "Starting kernel installation"
     [ ("scope", A.String $ T.pack $ show $ ioScope options)
     , ("force_reinstall", A.Bool $ ioForceReinstall options)
     , ("validation_level", A.String $ T.pack $ show $ ioValidationLevel options)
     ]
-  
+
   -- Constitutional resource limits for installation operations (<2min, <100MB)
   let installationLimits = defaultResourceLimits
         { rcMaxCpuSeconds = 120.0  -- 2 minute timeout for installation
         , rcMaxMemoryMB = 100      -- 100MB memory limit per specification
         , rcMaxOutputBytes = 10485760  -- 10MB output limit for logs
         }
-  
-  result <- withResourceGuard installationLimits $ \guard -> do
+
+  result <- withResourceGuard installationLimits $ \_guard -> do
     -- Step 1: Detect Jupyter environment (T015 implementation)
     logInstallStep "detect-environment" "Detecting Jupyter environment" []
     jupyterEnvResult <- withCLIResourceError "jupyter-environment-detection" detectJupyterEnvironment
     case jupyterEnvResult of
       Left diag -> do
-        logInstallError "detect-environment" "Failed to detect Jupyter environment" 
+        logInstallError "detect-environment" "Failed to detect Jupyter environment"
           [("error", A.String $ T.pack $ show diag)]
         return $ Left diag
       Right jupyterEnv -> do
@@ -863,10 +852,10 @@ executeInstall options = withErrorContext "kernel-installation" $ do
           [ ("kernelspec_dirs", A.Number $ fromIntegral $ length $ jeKernelspecDirs jupyterEnv)
           , ("install_type", A.String $ T.pack $ show $ jeInstallType jupyterEnv)
           ]
-        
+
         -- Step 2: Validate environment meets installation requirements  
         logInstallStep "validate-environment" "Validating Jupyter environment" []
-        validationResult <- withCLIResourceError "jupyter-environment-validation" $ 
+        validationResult <- withCLIResourceError "jupyter-environment-validation" $
           validateJupyterEnvironment jupyterEnv options
         case validationResult of
           Left diag -> do
@@ -875,10 +864,10 @@ executeInstall options = withErrorContext "kernel-installation" $ do
             return $ Left diag
           Right validatedEnv -> do
             logInstallStep "validate-environment" "Environment validation successful" []
-            
+
             -- Step 3: Execute complete kernel registration workflow (T018)
             logInstallStep "kernel-registration" "Starting kernel registration" []
-            registrationResult <- withCLIResourceError "kernel-registration" $ 
+            registrationResult <- withCLIResourceError "kernel-registration" $
               executeKernelRegistration options validatedEnv
             case registrationResult of
               Left diag -> do
@@ -902,8 +891,8 @@ detectJupyterEnvironment = withErrorContext "jupyter-environment-detection" $ do
         , rcMaxMemoryMB = 25       -- 25MB memory limit for detection operations
         , rcMaxOutputBytes = 524288  -- 512KB output limit for command outputs
         }
-  
-  withResourceGuard detectionLimits $ \guard -> do
+
+  withResourceGuard detectionLimits $ \_guard -> do
     -- Use the Utilities module function for core detection
     result <- withCLIResourceError "core-jupyter-detection" Utilities.detectJupyterEnvironment
     case result of
@@ -918,11 +907,11 @@ enhanceJupyterEnvironment :: JupyterEnvironment -> IO JupyterEnvironment
 enhanceJupyterEnvironment jupyterEnv = do
   -- Verify kernelspec directories are accessible
   validatedDirs <- filterValidKernelspecDirs (jeKernelspecDirs jupyterEnv)
-  
+
   -- Detect more precise Python version information
   enhancedPython <- enhancePythonEnvironment (jePythonEnv jupyterEnv)
-  
-  return jupyterEnv 
+
+  return jupyterEnv
     { jeKernelspecDirs = validatedDirs
     , jePythonEnv = enhancedPython
     }
@@ -950,7 +939,7 @@ validateJupyterEnvironment jupyterEnv options = do
     Right validatedDirs -> do
       -- Update environment with validated directories
       let updatedEnv = jupyterEnv { jeKernelspecDirs = validatedDirs }
-      
+
       -- Validate Python environment compatibility
       pythonValidation <- validatePythonCompatibility (jePythonEnv jupyterEnv) options
       case pythonValidation of
@@ -1010,7 +999,7 @@ filterUserDirectories dirs = do
   let userDirs = filter (isUserDirectory homeDir) dirs
   filterAccessibleDirectories userDirs
   where
-    isUserDirectory homeDir dir = 
+    isUserDirectory homeDir dir =
       T.pack homeDir `T.isInfixOf` T.pack dir || "/.local/" `T.isInfixOf` T.pack dir
 
 -- | Filter directories to system ones (T016: Enhanced implementation)
@@ -1019,8 +1008,8 @@ filterSystemDirectories dirs = do
   let systemDirs = filter isSystemDirectory dirs
   filterAccessibleDirectories systemDirs
   where
-    isSystemDirectory dir = 
-      "/usr/" `T.isInfixOf` T.pack dir || 
+    isSystemDirectory dir =
+      "/usr/" `T.isInfixOf` T.pack dir ||
       "/opt/" `T.isInfixOf` T.pack dir ||
       "/Library/" `T.isInfixOf` T.pack dir  -- macOS system directories-- | Validate Python environment compatibility with installation requirements
 validatePythonCompatibility :: PythonEnvironment -> InstallOptions -> IO (Either CLIDiagnostic PythonEnvironment)
@@ -1040,27 +1029,27 @@ findKernelspecDirectories :: IO (Either CLIDiagnostic [FilePath])
 findKernelspecDirectories = do
   -- Standard Jupyter kernelspec locations
   homeDir <- getHomeDirectory
-  
+
   -- Get system and user kernelspec directories
-  let standardDirs = 
+  let standardDirs =
         [ homeDir </> ".local" </> "share" </> "jupyter" </> "kernels"  -- User local
         , homeDir </> ".jupyter" </> "kernels"                          -- User jupyter
         , "/usr/local/share/jupyter/kernels"                           -- System local
         , "/usr/share/jupyter/kernels"                                 -- System global
         ]
-  
+
   -- Check for conda environment directories
   condaEnvDirs <- findCondaKernelspecDirs
-  
+
   -- Check for custom JUPYTER_PATH directories
   customDirs <- findCustomJupyterDirs
-  
+
   -- Combine all potential directories
   let allDirs = standardDirs ++ condaEnvDirs ++ customDirs
-  
+
   -- Filter to only existing and accessible directories
   validDirs <- filterAccessibleDirectories allDirs
-  
+
   if null validDirs
     then return $ Left $ ValidationError "No accessible kernelspec directories found in system"
     else return $ Right validDirs
@@ -1071,9 +1060,9 @@ findCondaKernelspecDirs = do
   -- Check for conda environments
   condaEnv <- lookupEnv "CONDA_PREFIX"
   condaDefault <- lookupEnv "CONDA_DEFAULT_ENV"
-  
+
   let condaDirs = case (condaEnv, condaDefault) of
-        (Just prefix, _) -> 
+        (Just prefix, _) ->
           [ prefix </> "share" </> "jupyter" </> "kernels"
           ]
         (Nothing, Just defaultEnv) ->
@@ -1082,14 +1071,14 @@ findCondaKernelspecDirs = do
           , "/usr/local/conda/envs" </> defaultEnv </> "share" </> "jupyter" </> "kernels"
           ]
         _ -> []
-  
+
   -- Also check for miniconda/anaconda in home directory
   homeDir <- getHomeDirectory
-  let homeConda = 
+  let homeConda =
         [ homeDir </> "miniconda3" </> "share" </> "jupyter" </> "kernels"
         , homeDir </> "anaconda3" </> "share" </> "jupyter" </> "kernels"
         ]
-  
+
   return $ condaDirs ++ homeConda
 
 -- | Find custom Jupyter directories from JUPYTER_PATH environment variable (T016)
@@ -1108,7 +1097,7 @@ ensureDirectoryExists :: FilePath -> IO (Either CLIDiagnostic FilePath)
 ensureDirectoryExists dir = do
   result <- try $ createDirectoryIfMissing True dir
   case result of
-    Left (ex :: IOException) -> 
+    Left (ex :: IOException) ->
       return $ Left $ ValidationError $ "Failed to create directory " <> T.pack dir <> ": " <> T.pack (show ex)
     Right () -> do
       -- Verify the directory was created and is accessible
@@ -1123,7 +1112,7 @@ ensureDirectoryExists dir = do
 
 -- | Get the full path to kernel.json for a given kernelspec directory and kernel name (T016)
 getKernelPath :: FilePath -> Text -> FilePath
-getKernelPath kernelspecDir kernelName = 
+getKernelPath kernelspecDir kernelName =
   kernelspecDir </> T.unpack kernelName </> "kernel.json"
 
 -- | Validate that a kernelspec directory can accommodate a new kernel installation (T016)
@@ -1131,7 +1120,7 @@ validateKernelInstallation :: FilePath -> Text -> IO (Either CLIDiagnostic FileP
 validateKernelInstallation kernelspecDir kernelName = do
   let kernelDir = kernelspecDir </> T.unpack kernelName
   let kernelPath = getKernelPath kernelspecDir kernelName
-  
+
   -- Ensure the parent kernelspec directory exists
   kernelspecExists <- doesDirectoryExist kernelspecDir
   if not kernelspecExists
@@ -1204,12 +1193,12 @@ getLanguageIdentifier options = fromMaybe "haskell" (ioLanguage options)
 
 -- | Generate environment variables for kernel execution (T017)
 generateEnvironmentVariables :: InstallOptions -> FilePath -> Object
-generateEnvironmentVariables _options ghcPath = 
+generateEnvironmentVariables _options ghcPath =
   KM.fromList [(K.fromText "GHC_PATH", String $ T.pack ghcPath)]
 
 -- | Generate environment variables with custom additions (T033: Phase 5 US3)
 generateEnvironmentVariablesWithCustom :: InstallOptions -> FilePath -> Object
-generateEnvironmentVariablesWithCustom options ghcPath = 
+generateEnvironmentVariablesWithCustom options ghcPath =
   let baseEnv = generateEnvironmentVariables options ghcPath
       customEnvPairs = ioEnvironmentVars options
       customEnvMap = KM.fromList [(K.fromText key, String value) | (key, value) <- customEnvPairs]
@@ -1233,11 +1222,11 @@ generateKernelMetadata _options = KM.fromList
 
 -- | Generate kernel metadata with custom configuration (T033: Phase 5 US3)
 generateKernelMetadataWithCustom :: InstallOptions -> Object
-generateKernelMetadataWithCustom options = 
+generateKernelMetadataWithCustom options =
   let baseMetadata = generateKernelMetadata options
       customFields = case ioResourceLimits options of
         Nothing -> []
-        Just limits -> 
+        Just limits ->
           [ (K.fromText "resource_limits", resourceLimitsToMetadata limits)
           ]
   in KM.union (KM.fromList customFields) baseMetadata
@@ -1266,12 +1255,12 @@ writeKernelJson kernelPath kernelJson = do
     -- Ensure the directory exists
     let kernelDir = takeDirectory kernelPath
     createDirectoryIfMissing True kernelDir
-    
+
     -- Write kernel.json with standard JSON formatting
     LBS.writeFile kernelPath $ encode kernelJson
-  
+
   case result of
-    Left (ex :: IOException) -> 
+    Left (ex :: IOException) ->
       return $ Left $ ValidationError $ "Failed to write kernel.json: " <> T.pack (show ex)
     Right () -> return $ Right ()
 
@@ -1310,7 +1299,7 @@ validateKernelJson kernelJson = do
     Object obj -> do
       -- Check required fields according to Jupyter kernel specification
       case (KM.lookup (K.fromText "argv") obj, KM.lookup (K.fromText "display_name") obj, KM.lookup (K.fromText "language") obj) of
-        (Just (Array _), Just (String _), Just (String _)) -> 
+        (Just (Array _), Just (String _), Just (String _)) ->
           return $ Right kernelJson
         _ -> return $ Left $ ValidationError "Invalid kernel.json: missing required fields (argv, display_name, language)"
     _ -> return $ Left $ ValidationError "Invalid kernel.json: root must be an object"
@@ -1328,22 +1317,22 @@ executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registra
         , rcMaxMemoryMB = 50       -- 50MB memory limit for file operations
         , rcMaxOutputBytes = 1048576  -- 1MB output limit for logs
         }
-  
-  withResourceGuard registrationLimits $ \guard -> do
+
+  withResourceGuard registrationLimits $ \_guard -> do
     -- Step 1: Find suitable kernelspec directory for installation  
-    targetDirectoryResult <- withCLIResourceError "directory-selection" $ 
+    targetDirectoryResult <- withCLIResourceError "directory-selection" $
       selectInstallationDirectory options jupyterEnv
     case targetDirectoryResult of
       Left diag -> return $ Left diag
       Right targetDir -> do
         -- Step 2: Determine kernel name and check for conflicts
-        kernelNameResult <- withCLIResourceError "kernel-name-resolution" $ 
+        kernelNameResult <- withCLIResourceError "kernel-name-resolution" $
           resolveKernelName options targetDir
         case kernelNameResult of
           Left diag -> return $ Left diag
           Right kernelName -> do
             -- Step 3: Get GHC path for kernel configuration
-            ghcPathResult <- withCLIResourceError "ghc-path-resolution" $ 
+            ghcPathResult <- withCLIResourceError "ghc-path-resolution" $
               resolveGHCPath options
             case ghcPathResult of
               Left diag -> return $ Left diag
@@ -1351,13 +1340,13 @@ executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registra
                 -- Step 4: Create kernel directory and install kernel.json with cleanup
                 let kernelPath = getKernelPath targetDir kernelName
                 installResult <- withCLIResourceCleanup (cleanupOnFailure kernelPath) $
-                  withCLIResourceError "kernel-json-installation" $ 
+                  withCLIResourceError "kernel-json-installation" $
                     installKernelJson options kernelPath ghcPath
                 case installResult of
                   Left diag -> return $ Left diag
                   Right installedPath -> do
                     -- Step 5: Verify installation success with requested validation level (T024)
-                    verificationResult <- withCLIResourceError "installation-verification" $ 
+                    verificationResult <- withCLIResourceError "installation-verification" $
                       verifyKernelInstallationWithLevel (ioValidationLevel options) installedPath
                     case verificationResult of
                       Left diag -> return $ Left diag
@@ -1370,13 +1359,12 @@ cleanupOnFailure kernelPath = do
   when dirExists $ do
     -- Remove incomplete kernel directory if it exists
     (try :: IO () -> IO (Either SomeException ())) (removeDirectoryRecursive (takeDirectory kernelPath)) >> return ()
-  return ()
 
 -- | Select the most appropriate installation directory from available options (T018)
 selectInstallationDirectory :: InstallOptions -> JupyterEnvironment -> IO (Either CLIDiagnostic FilePath)
 selectInstallationDirectory options jupyterEnv = do
   let availableDirs = jeKernelspecDirs jupyterEnv
-  
+
   case ioScope options of
     AutoDetect -> do
       -- Choose the first writable directory, preferring user directories
@@ -1384,21 +1372,21 @@ selectInstallationDirectory options jupyterEnv = do
       case suitableDir of
         Nothing -> return $ Left $ ValidationError "No suitable installation directory found"
         Just dir -> return $ Right dir
-        
+
     UserInstallation -> do
       -- Filter to user directories only
       userDirs <- filterUserDirectories availableDirs
       case userDirs of
         [] -> return $ Left $ ValidationError "No user-accessible kernelspec directories found"
         (dir:_) -> return $ Right dir
-        
+
     SystemInstallation -> do
       -- Filter to system directories only
       systemDirs <- filterSystemDirectories availableDirs
       case systemDirs of
         [] -> return $ Left $ ValidationError "No system kernelspec directories found or insufficient permissions"
         (dir:_) -> return $ Right dir
-        
+
     CustomPath customDir -> do
       -- Validate custom directory exists and is writable
       customValidation <- filterAccessibleDirectories [customDir]
@@ -1424,7 +1412,7 @@ resolveKernelName :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Text
 resolveKernelName options targetDir = do
   let baseKernelName = fromMaybe "haskell" (ioDisplayName options)
       proposedName = T.toLower $ T.replace " " "-" baseKernelName
-  
+
   if ioForceReinstall options
     then do
       -- Force reinstall: remove existing installation if present
@@ -1463,7 +1451,7 @@ generateUniqueKernelName targetDir baseName = do
 resolveGHCPath :: InstallOptions -> IO (Either CLIDiagnostic FilePath)
 resolveGHCPath options = do
   case ioGHCPath options of
-    Just customGHCPath -> 
+    Just customGHCPath ->
       -- Use custom GHC path if provided
       return $ Right customGHCPath
     Nothing -> do
@@ -1485,18 +1473,18 @@ verifyKernelInstallation kernelPath = do
 -- | Enhanced kernel installation verification with validation level support (T024)
 verifyKernelInstallationWithLevel :: ValidationLevel -> FilePath -> IO (Either CLIDiagnostic ())
 verifyKernelInstallationWithLevel validationLevel kernelPath = do
-  logInstallStep "verification" ("Starting kernel verification at level: " ++ show validationLevel) 
+  logInstallStep "verification" ("Starting kernel verification at level: " ++ show validationLevel)
     [("kernel_path", A.String $ T.pack kernelPath)]
-  
+
   case validationLevel of
     NoValidation -> do
       logInstallStep "verification" "Skipping validation (NoValidation level)" []
       return $ Right ()
-      
+
     BasicValidation -> do
       logInstallStep "verification" "Performing basic validation" []
       performBasicValidation kernelPath
-      
+
     FullValidation -> do
       logInstallStep "verification" "Performing full kernel functionality validation" []
       -- First do basic validation
@@ -1509,7 +1497,7 @@ verifyKernelInstallationWithLevel validationLevel kernelPath = do
           case functionalityResult of
             Left diag -> return $ Left diag
             Right _ -> do
-              logInstallSuccess "Kernel functionality verification completed successfully" 
+              logInstallSuccess "Kernel functionality verification completed successfully"
                 [("validation_level", A.String "full")]
               return $ Right ()
 
@@ -1524,11 +1512,11 @@ performBasicValidation kernelPath = do
       -- Try to parse the kernel.json file to ensure it's valid
       result <- try $ LBS.readFile kernelPath
       case result of
-        Left (_ :: IOException) -> 
+        Left (_ :: IOException) ->
           return $ Left $ ValidationError $ "Kernel installation verification failed: cannot read " <> T.pack kernelPath
         Right content -> do
           case eitherDecode content of
-            Left parseError -> 
+            Left parseError ->
               return $ Left $ ValidationError $ "Kernel installation verification failed: invalid JSON in " <> T.pack kernelPath <> ": " <> T.pack parseError
             Right (kernelJson :: Value) -> do
               -- Validate the kernel.json structure
@@ -1540,9 +1528,9 @@ performBasicValidation kernelPath = do
 -- | Perform kernel functionality test by attempting basic operations (T024 implementation)
 performKernelFunctionalityTest :: FilePath -> IO (Either CLIDiagnostic ())
 performKernelFunctionalityTest kernelPath = withErrorContext "kernel-functionality-test" $ do
-  logInstallStep "functionality-test" "Testing basic kernel functionality" 
+  logInstallStep "functionality-test" "Testing basic kernel functionality"
     [("kernel_path", A.String $ T.pack kernelPath)]
-  
+
   -- Constitutional timeout for functionality tests (30 seconds max)
   functionalityResult <- withCLITimeout 30 "kernel-functionality-test" $ do
     -- Test 1: Verify GHC executable is accessible from kernel configuration
@@ -1560,7 +1548,7 @@ performKernelFunctionalityTest kernelPath = withErrorContext "kernel-functionali
             case environmentTestResult of
               Left diag -> return $ Left diag
               Right _ -> return $ Right ()
-  
+
   return functionalityResult
 
 -- | Test GHC accessibility from kernel configuration (T024)
@@ -1569,7 +1557,7 @@ testKernelGHCAccess kernelPath = do
   -- Read kernel.json to extract GHC path
   kernelContent <- try $ LBS.readFile kernelPath
   case kernelContent of
-    Left (_ :: IOException) -> 
+    Left (_ :: IOException) ->
       return $ Left $ ValidationError "Cannot read kernel.json for GHC access test"
     Right content -> do
       case eitherDecode content of
@@ -1577,7 +1565,7 @@ testKernelGHCAccess kernelPath = do
         Right (kernelJson :: Value) -> do
           ghcPath <- extractGHCPath kernelJson
           case ghcPath of
-            Nothing -> 
+            Nothing ->
               return $ Left $ ValidationError "No GHC path found in kernel environment configuration"
             Just path -> do
               -- Test if GHC executable exists and is executable
@@ -1590,11 +1578,11 @@ testKernelGHCAccess kernelPath = do
                       readProcessWithExitCode path ["--version"] ""
                     return result
                   case versionResult of
-                    Left (_ :: SomeException) -> 
+                    Left (_ :: SomeException) ->
                       return $ Left $ ValidationError $ "GHC executable test failed: " <> T.pack path
                     Right Nothing ->
                       return $ Left $ ValidationError $ "GHC version check timed out: " <> T.pack path
-                    Right (Just (exitCode, _, _)) -> 
+                    Right (Just (exitCode, _, _)) ->
                       case exitCode of
                         ExitSuccess -> return $ Right ()
                         _ -> return $ Left $ ValidationError $ "GHC version check failed: " <> T.pack path
@@ -1606,7 +1594,7 @@ testKernelExecutableAccess kernelPath = do
   -- Read kernel.json to extract kernel executable path
   kernelContent <- try $ LBS.readFile kernelPath
   case kernelContent of
-    Left (_ :: IOException) -> 
+    Left (_ :: IOException) ->
       return $ Left $ ValidationError "Cannot read kernel.json for executable test"
     Right content -> do
       case eitherDecode content of
@@ -1614,7 +1602,7 @@ testKernelExecutableAccess kernelPath = do
         Right (kernelJson :: Value) -> do
           executablePath <- extractKernelExecutablePath kernelJson
           case executablePath of
-            Nothing -> 
+            Nothing ->
               return $ Left $ ValidationError "No kernel executable path found in argv configuration"
             Just path -> do
               -- Test if kernel executable exists and has proper permissions
@@ -1634,11 +1622,11 @@ testKernelEnvironment kernelPath = do
   -- Read kernel.json to validate environment variables
   kernelContent <- try $ LBS.readFile kernelPath
   case kernelContent of
-    Left (_ :: IOException) -> 
+    Left (_ :: IOException) ->
       return $ Left $ ValidationError "Cannot read kernel.json for environment test"
     Right content -> do
       case eitherDecode content of
-        Left _ -> return $ Left $ ValidationError "Invalid kernel.json format for environment test"  
+        Left _ -> return $ Left $ ValidationError "Invalid kernel.json format for environment test"
         Right (kernelJson :: Value) -> do
           -- Validate required fields and environment configuration
           envValidation <- validateEnvironmentConfiguration kernelJson
@@ -1704,10 +1692,10 @@ validateEnvironmentConfiguration kernelJson = do
       missingFields <- filterM (isFieldMissing obj) requiredFields
       if null missingFields
         then return $ Right ()
-        else return $ Left $ ValidationError $ 
+        else return $ Left $ ValidationError $
           "Missing required kernel.json fields: " <> T.pack (show missingFields)
     _ -> return $ Left $ ValidationError "kernel.json must be a JSON object"
   where
     isFieldMissing :: Object -> Text -> IO Bool
-    isFieldMissing obj fieldName = 
+    isFieldMissing obj fieldName =
       return $ not $ KM.member (K.fromText fieldName) obj
