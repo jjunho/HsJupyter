@@ -1,5 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{-|
+Module      : HsJupyter.Bridge.JupyterBridge
+Description : High-level Jupyter protocol bridge handlers
+Copyright   : (c) HsJupyter Contributors 2024-2025
+License     : MIT
+Maintainer  : dev@hsjupyter.org
+Stability   : stable
+
+This module provides the bridge between ZeroMQ protocol messages and
+the runtime execution system. It handles message validation, routing,
+and response generation for all Jupyter kernel protocol message types.
+
+Key responsibilities:
+- HMAC signature verification for incoming messages
+- Routing execute requests to the runtime manager
+- Generating protocol-compliant replies
+- Maintaining bridge-level telemetry (rejected message count)
+-}
+
 module HsJupyter.Bridge.JupyterBridge
   ( BridgeContext(..)
   , BridgeError(..)

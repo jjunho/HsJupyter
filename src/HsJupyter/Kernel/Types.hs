@@ -1,3 +1,16 @@
+{-|
+Module      : HsJupyter.Kernel.Types
+Description : Core type definitions for the HsJupyter kernel
+Copyright   : (c) HsJupyter Contributors 2024-2025
+License     : MIT
+Maintainer  : dev@hsjupyter.org
+Stability   : stable
+
+This module provides the central type definitions used throughout the kernel,
+including configuration, logging levels, and kernel lifecycle state. It also
+re-exports types from the runtime subsystems for convenience.
+-}
+
 module HsJupyter.Kernel.Types
   ( LogLevel(..)
   , KernelProcessConfig(..)

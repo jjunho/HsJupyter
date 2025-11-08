@@ -39,7 +39,6 @@ import HsJupyter.Bridge.JupyterBridge
 import HsJupyter.Runtime.Manager
   ( withRuntimeManager
   )
-import HsJupyter.Runtime.SessionState (ResourceBudget(..))
 import HsJupyter.Bridge.Protocol.Codec
   ( EnvelopeFrameError(..)
   , parseEnvelopeFrames
@@ -54,9 +53,6 @@ import HsJupyter.Bridge.Protocol.Envelope
   )
 import HsJupyter.Bridge.HeartbeatThread (HeartbeatStatus(..))
 import HsJupyter.Kernel.Types
-import HsJupyter.Runtime.Manager (withRuntimeManager)
-import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-
 
 
 -- | Load and validate the kernel configuration from a connection file.
