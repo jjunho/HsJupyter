@@ -12,9 +12,9 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (NominalDiffTime, getCurrentTime, diffUTCTime)
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
-import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic, mkError, mkInfo)
+import HsJupyter.Runtime.Diagnostics (mkInfo)
 import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, defaultGHCConfig)
 import HsJupyter.Runtime.GHCSession (newGHCSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
@@ -67,7 +67,7 @@ isDeclaration code =
       let trimmedLine = dropWhile (== ' ') line
           words' = words trimmedLine
       in case words' of
-           (name:params) -> '=' `elem` line && 
+           (name:_params) -> '=' `elem` line && 
                            not ("==" `isInfixOf` line) && 
                            not ("=>" `isInfixOf` line) &&
                            not (null name) &&

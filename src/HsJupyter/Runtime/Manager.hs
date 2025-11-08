@@ -1,5 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{-|
+Module      : HsJupyter.Runtime.Manager
+Description : Runtime manager with STM-based job queue and cancellation
+Copyright   : (c) HsJupyter Contributors 2024-2025
+License     : MIT
+Maintainer  : dev@hsjupyter.org
+Stability   : stable
+
+This module implements the runtime manager which coordinates code execution
+through an STM-based job queue with cancellation support. It manages:
+
+- Job submission and queuing with bounded capacity
+- Cancellation tokens using TMVar for graceful interruption
+- Worker thread lifecycle and job execution
+- Integration with both echo runtime and GHC runtime
+- Session state management across cell executions
+
+The manager provides a clean abstraction for the kernel bridge to submit
+execution requests without directly managing concurrency or GHC sessions.
+-}
+
 module HsJupyter.Runtime.Manager
   ( RuntimeManager(..)
   , withRuntimeManager
@@ -10,8 +31,7 @@ module HsJupyter.Runtime.Manager
 
 import Control.Concurrent.Async (Async, async, cancel)
 import Control.Concurrent.STM
-  ( STM
-  , TBQueue
+  ( TBQueue
   , TMVar
   , TVar
   , atomically
@@ -24,8 +44,6 @@ import Control.Concurrent.STM
   , readTVar
   , takeTMVar
   , tryPutTMVar
-  , tryReadTMVar
-  , tryTakeTMVar
   , writeTBQueue
   , writeTVar
   )
@@ -48,8 +66,7 @@ import HsJupyter.Runtime.SessionState
   , initialSessionState
   , ResourceBudget(..)
   )
-import HsJupyter.Runtime.GHCSession (GHCSessionState)
-import HsJupyter.Runtime.GHCRuntime (defaultGHCConfig)
+
 
 -- | Handle exposed to router/kernel for submitting jobs and interrupts.
 data RuntimeManager = RuntimeManager
