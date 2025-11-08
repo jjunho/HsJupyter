@@ -1,4 +1,3 @@
-#!/usr/bin/env runhaskell
 {-# LANGUAGE OverloadedStrings #-}
 
 -- T040: Phase 6 User Story 4 Final Validation Test
