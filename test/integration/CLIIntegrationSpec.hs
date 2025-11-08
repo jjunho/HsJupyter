@@ -235,7 +235,7 @@ spec = describe "CLI Integration Tests" $ do
           let fullValidationOptions = defaultTestOptions { ioValidationLevel = FullValidation }
           result <- liftIO $ generateKernelJson fullValidationOptions "/usr/bin/ghc"
           case result of
-            Right kernelJson -> do
+            Right _kernelJson -> do
               -- Test the enhanced verification
               verifyResult <- liftIO $ verifyKernelInstallationWithLevel FullValidation "/tmp/test-kernel.json" 
               case verifyResult of

@@ -6,7 +6,6 @@ import Test.Hspec
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, SomeException)
 import Data.Either (isRight)
-import Control.Concurrent (forkIO, threadDelay)
 
 import HsJupyter.CLI.Install
   ( detectJupyterEnvironment
@@ -45,14 +44,12 @@ import HsJupyter.CLI.Install
   ( logCLIOperation
   , logInstallStep
   -- T021: Cancellation support test imports
-  , CancellationToken
   , createCancellationToken
   , cancelOperation
   , isCancelled
   , executeInstallWithCancellation
   )
-import Data.Aeson (Value(..), object, (.=))
-import Data.Aeson.Types (Array)
+import Data.Aeson (Value(..), object)
 import qualified Data.Vector as V
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -487,8 +484,8 @@ spec = describe "HsJupyter.CLI.Install" $ do
     describe "executeInstallWithCancellation" $ do  
       it "should support cancellable installation workflow" $ do
         -- Test function exists and has proper signature
-        let options = defaultInstallOptions
-        token <- liftIO createCancellationToken
+        let _options = defaultInstallOptions
+        _token <- liftIO createCancellationToken
         -- Don't actually run the installation, just test the function exists
         pendingWith "Cancellable installation test (skipped to avoid long execution)"
           
