@@ -45,7 +45,7 @@ data GHCSessionState = GHCSessionState
   { sessionId :: String                        -- Unique session identifier
   , definedBindings :: TVar (Set String)       -- Thread-safe tracking of defined variables/functions
   , declarations :: TVar [String]              -- Full declaration code for replay
-  , importedModules :: TVar [String]           -- List of successfully imported modules (ModuleName later)
+  , importedModules :: TVar [String]           -- List of successfully imported modules (full import statements)
   , sessionConfig :: GHCConfig                 -- Configuration including timeout values and import policy
   , interpreterState :: TVar InterpreterState  -- Current interpreter state
   }
@@ -113,9 +113,9 @@ addDeclaration session decl = modifyTVar' (declarations session) (++ [decl])
 listDeclarations :: GHCSessionState -> STM [String]
 listDeclarations session = readTVar (declarations session)
 
--- | Add a successfully imported module
+-- | Add a successfully imported module (full import statement)
 addImportedModule :: GHCSessionState -> String -> STM ()
-addImportedModule session moduleName = modifyTVar' (importedModules session) (moduleName:)
+addImportedModule session importStmt = modifyTVar' (importedModules session) (importStmt:)
 
 -- | Get list of imported modules
 listImportedModules :: GHCSessionState -> STM [String]
