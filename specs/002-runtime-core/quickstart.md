@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - GHC 9.12.2+ installed via `ghcup`
-- Cabal 3.0+ 
+- Cabal 3.0+
 - Python 3.8+ with `pyzmq` for testing
 
 ## Building the Runtime Core
@@ -72,6 +72,7 @@ python3 phase1_echo_notebook.py
 ```
 
 **Expected behavior:**
+
 - Cell A: `let x = 42` → Execution count 1, defines binding
 - Cell B: `x + 10` → Execution count 2, returns `52` (reuses binding from A)
 - Cell C: `let y = x * 2` → Execution count 3, creates new binding using x
@@ -186,12 +187,14 @@ data DiagnosticSeverity = SeverityInfo | SeverityWarning | SeverityError
 ### Common Build Issues
 
 **Missing dependencies:**
+
 ```bash
 cabal v2-configure --enable-tests
 cabal v2-install --dependencies-only
 ```
 
 **GHC version mismatch:**
+
 ```bash
 ghcup install ghc 9.12.2
 ghcup set ghc 9.12.2
@@ -200,20 +203,24 @@ ghcup set ghc 9.12.2
 ### Runtime Issues
 
 **Memory limit exceeded:**
+
 - Increase `rcMaxMemoryMB` in ResourceLimits
 - Check for memory leaks in evaluation code
 
 **Timeout errors:**
+
 - Increase `rcMaxCpuSeconds` for long-running computations
 - Verify cancellation tokens are being checked
 
 **State not persisting:**
+
 - Check session state management in RuntimeManager
 - Verify bindings are being stored correctly
 
 ### Test Failures
 
 **Unit test compilation errors:**
+
 ```bash
 # Check test dependencies
 cabal v2-build test:unit --dry-run
@@ -223,6 +230,7 @@ cabal v2-build lib:hs-jupyter-kernel
 ```
 
 **Integration test timeouts:**
+
 ```bash
 # Run with verbose output
 cabal v2-test integration --test-show-details=streaming
@@ -236,6 +244,7 @@ python3 scripts/demo/phase1_echo_notebook.py --debug
 ### Adding New Runtime Features
 
 1. **Add unit tests first:**
+
    ```bash
    # Create new test file
    touch test/unit/NewFeatureSpec.hs
@@ -245,6 +254,7 @@ python3 scripts/demo/phase1_echo_notebook.py --debug
    ```
 
 2. **Implement feature:**
+
    ```bash
    # Create implementation
    touch src/HsJupyter/Runtime/NewFeature.hs
@@ -254,12 +264,14 @@ python3 scripts/demo/phase1_echo_notebook.py --debug
    ```
 
 3. **Integration testing:**
+
    ```bash
    # Add integration scenarios
    vim test/integration/RuntimeNotebookSpec.hs
    ```
 
 4. **Verify full pipeline:**
+
    ```bash
    cabal v2-test all
    python3 scripts/demo/phase1_echo_notebook.py
@@ -288,6 +300,7 @@ python3 scripts/demo/stress_test.py
 ## Status: ✅ Phase 2 Runtime Core Complete
 
 All core functionality implemented and tested:
+
 - ✅ Stateful execution pipeline  
 - ✅ Responsive cancellation
 - ✅ Resource guards and diagnostics

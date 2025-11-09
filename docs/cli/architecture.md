@@ -53,6 +53,7 @@ hs-jupyter-kernel --connection connection.json
 ### 2. Constitutional Compliance
 
 All CLI code follows established patterns:
+
 - Modular architecture with SOLID principles
 - DRY error handling through shared utilities
 - Comprehensive logging and observability
@@ -61,6 +62,7 @@ All CLI code follows established patterns:
 ### 3. Cross-Platform Support
 
 CLI operations work across Linux, macOS, and Windows:
+
 - Use `System.FilePath` for path operations
 - Handle platform-specific Jupyter installations
 - Support various Python environments (conda, pip, system)
@@ -77,6 +79,7 @@ CLI operations work across Linux, macOS, and Windows:
 ## Future Enhancements
 
 Planned for subsequent user stories:
+
 - Custom installation configuration
 - JSON output for programmatic access
 - Advanced diagnostic capabilities

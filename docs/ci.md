@@ -209,4 +209,3 @@ Add these badges to your README:
 - [ ] Performance benchmarking in CI
 - [ ] Docker image builds
 - [ ] Nightly builds from master
-
