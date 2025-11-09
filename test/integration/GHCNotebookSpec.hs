@@ -222,12 +222,12 @@ spec = describe "GHC Notebook Integration" $ do
           Just result -> result `shouldBe` "[1,1,3,4,5]"
           Nothing -> expectationFailure "Expected sorted list result"
 
-    it "imports qualified modules with alias" $ do 
+    it "imports qualified modules with alias" $ do
       withRuntimeManager testGHCResourceBudget 10 $ \manager -> do
         -- Import qualified Data.List as L
         let ctx1 = testExecuteContext "ghc-qualified-001"
         outcome1 <- submitGHCImport manager ctx1 testJobMetadata "qualified Data.List as L"
-        
+
         outcomeStatus outcome1 `shouldBe` ExecutionOk
         
         -- Use qualified function
