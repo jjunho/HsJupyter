@@ -154,7 +154,7 @@
 
 ### Expression Evaluation Flow
 
-```
+```text
 GHCEvaluationRequest
     ↓ (validate)
 GHCRuntime.evaluateExpression
@@ -168,7 +168,7 @@ GHCSessionState.definedBindings
 
 ### Import Processing Flow
 
-```
+```text
 GHCEvaluationRequest (Import)
     ↓ (import policy check)
 ImportPolicy.allowedModules
@@ -182,7 +182,7 @@ GHCEvaluationResult
 
 ### Error Handling Flow
 
-```
+```text
 hint.InterpreterError
     ↓ (mapping)
 GHCDiagnostic

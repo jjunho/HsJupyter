@@ -92,6 +92,7 @@ No constitution violations identified; additional complexity log not required.
 ## Phase 2 – Task Generation Ready
 
 Once design artifacts are complete, run `/speckit.tasks` to produce an execution plan covering:
+
 - Runtime session management, evaluation, cancellation, and diagnostics modules.  
 - Resource guard integration.  
 - Unit and integration tests (golden notebook, cancellation, error reporting).  

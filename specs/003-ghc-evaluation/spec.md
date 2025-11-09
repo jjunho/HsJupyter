@@ -94,11 +94,13 @@ Users can write authentic Haskell code in Jupyter notebooks with:
 
 3. **Multi-line Definitions**
    - **Given** I define a multi-line function in cell 1:
+
      ```haskell
      factorial n = if n <= 1 
                    then 1 
                    else n * factorial (n-1)
      ```
+
    - **When** I execute cell 1 successfully
    - **And** I enter `factorial 5` in cell 2
    - **And** I execute cell 2

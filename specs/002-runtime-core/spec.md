@@ -16,6 +16,7 @@ As a notebook author I can execute Haskell cells sequentially and reuse prior de
 **Independent Test**: Run a golden notebook where cell B references definitions from cell A; verify `execute_reply` returns the expected value and execution counts increment monotonically in the same session.
 
 **Acceptance Scenarios**:
+
 1. **Given** a fresh runtime session, **When** cell `let x = 2` executes, **Then** the runtime stores `x` and reports `execute_reply` status `ok` with execution count `1`.
 2. **Given** the prior cell succeeded, **When** the author executes `x * 5`, **Then** the runtime reuses cached state, emits a stream/result of `10`, and marks execution count `2`.
 
@@ -30,6 +31,7 @@ As a maintainer I can interrupt a long-running cell and observe a deterministic 
 **Independent Test**: Launch a cell containing `threadDelay` or an infinite loop, issue `interrupt_request`, and confirm the runtime stops evaluation and surfaces `status=abort` within one second.
 
 **Acceptance Scenarios**:
+
 1. **Given** a cell executing, **When** the control channel sends `interrupt_request`, **Then** the runtime cancels worker threads, cleans up temporary artifacts, and replies with `status=abort`.
 
 ---
@@ -43,6 +45,7 @@ As an on-call maintainer I need structured diagnostics and resource caps so I ca
 **Independent Test**: Execute a cell that triggers a compilation error and another that allocates above the configured memory limit; verify structured diagnostics and throttling metrics appear in logs and telemetry.
 
 **Acceptance Scenarios**:
+
 1. **Given** a cell that fails to compile, **When** the runtime returns, **Then** the kernel emits diagnostics including module name, line numbers, and a user-friendly summary.
 2. **Given** a cell exceeding the configured memory budget, **When** the guard trips, **Then** the runtime aborts execution, reports a `resource-limit` error, and keeps the session healthy.
 
