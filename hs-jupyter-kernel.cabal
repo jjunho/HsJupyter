@@ -95,7 +95,7 @@ library
                      , HsJupyter.CLI.Utilities
 
   hs-source-dirs:     src
-  other-modules:
+  other-modules:      Paths_hs_jupyter_kernel
   default-extensions: OverloadedStrings
 
 executable hs-jupyter-kernel
