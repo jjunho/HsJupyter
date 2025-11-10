@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
 import HsJupyter.Runtime.Diagnostics (mkInfo)
-import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, defaultGHCConfig)
+import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, importModule, defaultGHCConfig)
 import HsJupyter.Runtime.GHCSession (newGHCSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
 import System.IO.Unsafe (unsafePerformIO)
@@ -49,6 +49,10 @@ getOrCreateGHCSession = do
       session <- atomically $ newGHCSession defaultGHCConfig
       writeIORef globalGHCSession (Just session)
       return session
+
+-- | Determine if code is an import statement
+isImport :: Text -> Bool
+isImport code = "import " `T.isPrefixOf` T.strip code
 
 -- | Determine if code is a declaration (let, function definition) or expression
 isDeclaration :: Text -> Bool
@@ -163,14 +167,23 @@ runGHCEvaluation newState executionCount job = do
   -- Get or create persistent GHC session
   ghcSession <- getOrCreateGHCSession
   
-  -- Evaluate the expression (or declaration based on content)
-  result <- if isDeclaration (jobSource job)
+  -- Handle import statements separately
+  result <- if isImport (jobSource job)
               then do
-                declResult <- evaluateDeclaration ghcSession (jobSource job)
-                case declResult of
+                -- Extract the import statement (remove "import " prefix if present)
+                let importStmt = T.unpack (jobSource job)
+                importResult <- importModule ghcSession importStmt
+                case importResult of
                   Left err -> return $ Left err
-                  Right bindings -> return $ Right (T.pack $ "Defined: " ++ unwords bindings)
-              else evaluateExpression ghcSession (jobSource job)
+                  Right () -> return $ Right ""  -- Empty result for successful import
+              -- Evaluate the expression (or declaration based on content)
+              else if isDeclaration (jobSource job)
+                then do
+                  declResult <- evaluateDeclaration ghcSession (jobSource job)
+                  case declResult of
+                    Left err -> return $ Left err
+                    Right bindings -> return $ Right (T.pack $ "Defined: " ++ unwords bindings)
+                else evaluateExpression ghcSession (jobSource job)
   
   case result of
     Left ghcError -> do

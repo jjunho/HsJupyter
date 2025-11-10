@@ -2,6 +2,7 @@
 # Data Model: Phase 2 – Runtime Core
 
 ## RuntimeSessionState
+
 - **Fields**:
   - `loadedModules :: Map ModuleName ModuleArtifact` — cache of compiled modules and artifacts.
   - `imports :: [ImportDecl]` — imports carried between cells.
@@ -12,6 +13,7 @@
 - **Validation Rules**: Must remain consistent after each job (no duplicate module names, executionCount >= previous).
 
 ## ExecutionJob
+
 - **Fields**:
   - `jobId :: Text` — unique id (msg_id) for correlation.
   - `source :: Text` — cell content.
@@ -23,6 +25,7 @@
 - **Validation Rules**: `source` length must be below payload guard; `cancelToken` initialised empty.
 
 ## ExecutionOutcome
+
 - **Fields**:
   - `status :: ExecuteStatus` — `Ok`, `Error`, `Abort`, `ResourceLimit`.
   - `streams :: [StreamChunk]` — stdout/stderr frames with order preserved.
@@ -34,6 +37,7 @@
 - **Validation Rules**: `executionCount` increments by 1 per successful/abort outcome; `ResourceLimit` outcomes must include at least one diagnostic entry.
 
 ## ResourceBudget
+
 - **Fields**:
   - `cpuTimeout :: NominalDiffTime` — maximum execution duration.
   - `memoryLimit :: Bytes` — soft memory cap.
@@ -43,17 +47,20 @@
 - **Validation Rules**: All values must be positive; `tempDir` must exist/be writable before execution starts.
 
 ## Diagnostics & Supporting Types
+
 - **RuntimeDiagnostic**: severity (error/warning/info), summary, optional file/span, suggestions.
 - **ModuleArtifact**: path to compiled object, interface, digest for caching.
 - **JobMetadata**: silent/store_history/user_expressions flags supplied by frontend.
 - **ExecutionQueue**: `TBQueue ExecutionJob` with bounded size (configurable) to back pressure clients.
 
 ## State Transitions
+
 - `RuntimeSessionState` transitions `Cold -> Warm -> Running -> Cancelling -> Draining -> Idle` per execution.
 - `ExecutionJob` lifecycle `Enqueued -> Running -> Completed | Cancelled | Failed`.
 - Resource guard states `Healthy -> Warning -> LimitExceeded` driving diagnostics.
 
 ## Data Volume & Scale Assumptions
+
 - Single active job; queue length small (<=10) during backlog.
 - Module artifacts stored under `~/.cache/hsjupyter/<hash>` with per-session temp directories.
 - Streams limited to <=1 MB per cell by guard.

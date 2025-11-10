@@ -78,7 +78,7 @@ import GHC.Stats (getRTSStats, RTSStats(..))
 import System.Timeout (timeout)
 import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImports, runStmt)
 
-import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
+import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, listDeclarations, addDeclaration, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
@@ -379,8 +379,18 @@ evaluateExpressionCancellable session code token = do
                   Right () -> return $ Right "" -- import succeeded, return empty string as expression result
               Nothing -> return $ Left (CompilationError (T.pack ("Unsupported GHCi command: " ++ cmd)) (SourceLocation 1 1 Nothing) [])
           else do
+            -- Get current session state to restore bindings and imports
+            decls <- atomically $ listDeclarations session
+            imports <- atomically $ listImportedModules session
+            
             interpreterResult <- runInterpreter $ do
-              setImports ["Prelude"]  -- Start with basic Prelude imports
+              -- Set up imports (including previously imported modules)
+              let allImports = "Prelude" : imports
+              setImports allImports
+              
+              -- Restore previous bindings by re-running declarations
+              mapM_ runStmt decls
+              
               -- Wrap expression with 'show' to get String representation
               let wrappedCode = "show (" ++ T.unpack code ++ ")"
               interpret wrappedCode (as :: String)
@@ -443,9 +453,19 @@ evaluateDeclarationCancellable session code token = do
     if cancelled 
       then return (Left (CompilationError "Operation was cancelled" (SourceLocation 1 1 Nothing) []))
       else do
+        -- Get current session state to restore bindings and imports
+        decls <- atomically $ listDeclarations session
+        imports <- atomically $ listImportedModules session
+        
         interpreterResult <- runInterpreter $ do
-          setImports ["Prelude"]  -- Start with basic Prelude imports
-          -- Execute the declaration using runStmt (for let bindings, function definitions)
+          -- Set up imports (including previously imported modules)
+          let allImports = "Prelude" : imports
+          setImports allImports
+          
+          -- Restore previous bindings by re-running declarations
+          mapM_ runStmt decls
+          
+          -- Execute the new declaration using runStmt (for let bindings, function definitions)
           runStmt (T.unpack code)
         return $ case interpreterResult of
           Left err -> Left (interpretError err)
@@ -461,7 +481,10 @@ evaluateDeclarationCancellable session code token = do
     Just (Right _) -> do
       -- Extract binding names and update session state
       let bindingNames = extractBindingNames code
-      atomically $ mapM_ (addBinding session) bindingNames
+          declCode = T.unpack code
+      atomically $ do
+        mapM_ (addBinding session) bindingNames
+        addDeclaration session declCode  -- Store the full declaration for replay
       return $ Right bindingNames
 
 -- | Import a Haskell module with security policy checking
@@ -524,12 +547,18 @@ importModuleCancellable session importStatement token = do
             if cancelled 
               then return (Left (CompilationError "Operation was cancelled" (SourceLocation 1 1 Nothing) []))
               else do
+                -- Get current session state to restore
+                currentDecls <- atomically $ listDeclarations session
+                currentImports <- atomically $ listImportedModules session
+                
                 interpreterResult <- runInterpreter $ do
-                  -- Get current imports and add the new module
-                  currentImports <- liftIO $ atomically $ listImportedModules session
-                  -- setImports expects a list of module NAMES (e.g. "Data.List"), not full import statements
+                  -- Set up imports (including the new module)
                   let allImports = "Prelude" : currentImports ++ [moduleName]
                   setImports allImports
+                  
+                  -- Restore previous declarations
+                  mapM_ runStmt currentDecls
+                  
                   return ()
                 return $ case interpreterResult of
                   Left err -> Left (interpretError err)

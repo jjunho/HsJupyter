@@ -26,6 +26,7 @@ Available for all commands:
 **Syntax**: `hs-jupyter-kernel install [options]`
 
 **Options**:
+
 - `--user`: Install for current user only (default if no system permissions)
 - `--system`: Install system-wide (requires appropriate permissions)
 - `--force`: Overwrite existing installation without confirmation
@@ -36,6 +37,7 @@ Available for all commands:
 - `--validation <level>`: Validation level (none|basic|full, default: basic)
 
 **Exit Codes**:
+
 - `0`: Installation successful
 - `1`: Installation failed - general error
 - `2`: Installation failed - insufficient permissions
@@ -43,6 +45,7 @@ Available for all commands:
 - `4`: Installation failed - invalid configuration
 
 **JSON Output Format**:
+
 ```json
 {
   "status": "success|error",
@@ -70,17 +73,20 @@ Available for all commands:
 **Syntax**: `hs-jupyter-kernel doctor [options]`
 
 **Options**:
+
 - `--check <component>`: Check specific component (jupyter|kernel|ghc|system|all, default: all)
 - `--fix`: Attempt to automatically fix detected issues
 - `--report <path>`: Save detailed diagnostic report to file
 
 **Exit Codes**:
+
 - `0`: System healthy or issues successfully resolved
 - `1`: Minor issues detected (system functional)
 - `2`: Major issues detected (system degraded)
 - `3`: Critical issues detected (system broken)
 
 **JSON Output Format**:
+
 ```json
 {
   "overall_status": "healthy|warnings|degraded|broken",
@@ -138,17 +144,20 @@ Available for all commands:
 **Syntax**: `hs-jupyter-kernel uninstall [options]`
 
 **Options**:
+
 - `--all`: Remove all HsJupyter kernel installations found
 - `--kernelspec-dir <path>`: Remove from specific kernelspec directory
 - `--confirm`: Skip confirmation prompts (use with caution)
 
 **Exit Codes**:
+
 - `0`: Uninstallation successful
 - `1`: Uninstallation failed - general error
 - `2`: Uninstallation failed - insufficient permissions
 - `3`: No installations found to remove
 
 **JSON Output Format**:
+
 ```json
 {
   "status": "success|error|partial",
@@ -176,14 +185,17 @@ Available for all commands:
 **Syntax**: `hs-jupyter-kernel list [options]`
 
 **Options**:
+
 - `--all`: Include non-functional and problematic installations
 - `--path <dir>`: Search specific directory for installations
 
 **Exit Codes**:
+
 - `0`: Command executed successfully
 - `1`: Error accessing installation directories
 
 **JSON Output Format**:
+
 ```json
 {
   "installations": [
@@ -213,13 +225,16 @@ Available for all commands:
 **Syntax**: `hs-jupyter-kernel version [options]`
 
 **Options**:
+
 - `--check-compatibility`: Check compatibility with current system
 
 **Exit Codes**:
+
 - `0`: Version information displayed successfully
 - `1`: Compatibility issues detected
 
 **JSON Output Format**:
+
 ```json
 {
   "hs_jupyter_kernel": "0.1.0.0",
