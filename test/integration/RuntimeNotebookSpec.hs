@@ -3,6 +3,7 @@
 module RuntimeNotebookSpec (spec) where
 
 import Data.Aeson (object, Value(..))
+import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import Test.Hspec
@@ -29,12 +30,18 @@ testExecuteContext msgId = ExecuteContext
   }
 
 -- Helper to extract text value from ExecutionOutcome payload
+-- | Extract the "text/plain" value from an ExecutionOutcome payload.
+-- The payload contains objects like {"text/plain": "value"}.
 outcomeValue :: ExecutionOutcome -> Maybe Text
-outcomeValue outcome = case outcomePayload outcome of
-  [value] -> case value of
-    String txt -> Just txt
-    _ -> Nothing
-  _ -> Nothing
+outcomeValue outcome = findTextPlain (outcomePayload outcome)
+  where
+    findTextPlain :: [Value] -> Maybe Text
+    findTextPlain [] = Nothing
+    findTextPlain (Object obj : rest) =
+      case KM.lookup "text/plain" obj of
+        Just (String txt) -> Just txt
+        _ -> findTextPlain rest
+    findTextPlain (_ : rest) = findTextPlain rest
 
 -- Helper to create test metadata
 testJobMetadata :: JobMetadata

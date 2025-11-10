@@ -17,7 +17,7 @@ This plan outlines the technical approach to fix a critical bug preventing the H
 **Testing**: `hspec` for unit and integration tests
 **Target Platform**: Linux, macOS, Windows (wherever Jupyter is supported)
 **Project Type**: Single project (kernel library and executable)
-**Performance Goals**: [NEEDS CLARIFICATION: Define specific performance targets for kernel startup and code execution]
+**Performance Goals**: Kernel startup <5 seconds, simple expression execution <500ms (aligned with research.md and competitive with other Jupyter kernels like IJulia, IRKernel)
 **Constraints**: Must be compatible with Jupyter Notebook v6.x and JupyterLab v3.x.
 **Scale/Scope**: Single-user kernel, not designed for concurrent remote access.
 

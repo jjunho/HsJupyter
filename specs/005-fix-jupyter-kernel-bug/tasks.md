@@ -10,7 +10,7 @@
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
-- **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
+- **[Story]**: Which user story this task belongs to (e.g., User Story 1, User Story 2, User Story 3)
 - Include exact file paths in descriptions
 
 ## Path Conventions
@@ -51,15 +51,15 @@
 
 > **MANDATORY: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [X] T007 [P] [US1] Create an integration test in `test/integration/ExecuteEchoSpec.hs` (stubbed - needs rewrite for current implementation)
+- [X] T007 [P] [User Story 1] Create an integration test in `test/integration/ExecuteEchoSpec.hs` (stubbed - needs rewrite for current implementation)
 
 ### Implementation for User Story 1
 
-- [X] T008 [US1] Implement the `execute_request` handler in the `RequestRouter` to forward code to the runtime.
-- [X] T009 [US1] Implement the GHC runtime evaluation logic in `src/HsJupyter/Runtime/Evaluation.hs` to execute the code.
-- [X] T010 [US1] Ensure that `stdout` and `stderr` are captured and sent back as `stream` messages.
-- [X] T011 [US1] Ensure the final result is sent back in an `execute_result` message.
-- [X] T012 [US1] Add structured logging in the execution path for easier debugging.
+- [X] T008 [User Story 1] Implement the `execute_request` handler in the `RequestRouter` to forward code to the runtime.
+- [X] T009 [User Story 1] Implement the GHC runtime evaluation logic in `src/HsJupyter/Runtime/Evaluation.hs` to execute the code.
+- [X] T010 [User Story 1] Ensure that `stdout` and `stderr` are captured and sent back as `stream` messages.
+- [X] T011 [User Story 1] Ensure the final result is sent back in an `execute_result` message.
+- [X] T012 [User Story 1] Add structured logging in the execution path for easier debugging.
 
 **Checkpoint**: User Story 1 implementation complete. Unit tests pass (248 examples, 0 failures, 11 pending). Integration test needs rewrite.
 
@@ -73,13 +73,13 @@
 
 ### Tests for User Story 2 ⚠️
 
-- [X] T013 [P] [US2] Create an integration test that simulates an `interrupt_request` during a long-running execution.
+- [X] T013 [P] [User Story 2] Create an integration test that simulates an `interrupt_request` during a long-running execution.
 
 ### Implementation for User Story 2
 
-- [X] T014 [US2] Implement the `interrupt_request` handler in `src/HsJupyter/Router.hs`.
-- [X] T015 [US2] Use STM or async exceptions to gracefully terminate the running computation in the GHC runtime.
-- [X] T016 [US2] Implement the `shutdown_request` handler to support kernel restarts.
+- [X] T014 [User Story 2] Implement the `interrupt_request` handler in `src/HsJupyter/Router.hs`.
+- [X] T015 [User Story 2] Use STM or async exceptions to gracefully terminate the running computation in the GHC runtime.
+- [X] T016 [User Story 2] Implement the `shutdown_request` handler to support kernel restarts.
 
 **Checkpoint**: User Stories 1 AND 2 implementation complete. Integration tests need validation with real kernel.
 
@@ -107,7 +107,7 @@
 ### User Story Dependencies
 
 - **User Story 1 (P1)**: Depends on Foundational.
-- **User Story 2 (P2)**: Depends on Foundational and US1.
+- **User Story 2 (P2)**: Depends on Foundational and User Story 1.
 
 ### Within Each User Story
 
