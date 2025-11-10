@@ -44,7 +44,7 @@ import HsJupyter.Runtime.ResourceGuard
   )
 
 -- CLI Types integration
-import HsJupyter.CLI.Types 
+import HsJupyter.CLI.Types
   ( CLIDiagnostic(..)
   , DiagnosticResult(..)
   , JupyterEnvironment(..)
@@ -57,9 +57,19 @@ import HsJupyter.CLI.Types
   , Recommendation(..)
   , Priority(..)
   , SystemInformation(..)
+  , InstallationStatus(..)
+  , KernelInstallation(..)
+  , JupyterVersion(..)
   )
-import HsJupyter.CLI.Commands (GlobalOptions(..))
-import HsJupyter.CLI.Install (detectJupyterEnvironment, logCLIOperation)
+import HsJupyter.CLI.Commands (GlobalOptions(..), ListOptions(..))
+import HsJupyter.CLI.Install
+  ( detectJupyterEnvironment
+  , logCLIOperation
+  , listKernelInstallations
+  )
+import System.Directory (findExecutable)
+import System.Process (readProcessWithExitCode)
+import System.Exit (ExitCode(..))
 
 -- ===========================================================================
 -- T025: DiagnosticResult Data Model and Analysis Logic
@@ -370,19 +380,66 @@ checkJupyterComponent _depth checkTime = do
 -- | Check HsJupyter kernel component health
 checkKernelComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
 checkKernelComponent _depth checkTime = do
-  -- TODO: Implement kernel detection logic
-  -- For now, return placeholder status
-  let status = ComponentStatus
-        { csComponent = KernelComponent
-        , csHealth = NotFoundComponent  -- Will be updated with actual detection
-        , csVersion = Nothing
-        , csPath = Nothing
-        , csAccessible = False
-        , csFunctional = False
-        , csIssues = []
-        , csLastCheck = checkTime
+  -- List all kernel installations using the exported function
+  let listOpts = ListOptions
+        { loShowAll = True  -- Include all installations for comprehensive diagnostics
+        , loSearchPath = Nothing  -- Search all standard directories
         }
-  return $ Right status
+  installationsResult <- listKernelInstallations listOpts
+  case installationsResult of
+    Left _diag -> do
+      -- Cannot find kernelspec directories or other error
+      let status = ComponentStatus
+            { csComponent = KernelComponent
+            , csHealth = NotFoundComponent
+            , csVersion = Nothing
+            , csPath = Nothing
+            , csAccessible = False
+            , csFunctional = False
+            , csIssues = [Issue Major KernelComponent "Unable to locate kernelspec directories" Nothing]
+            , csLastCheck = checkTime
+            }
+      return $ Right status
+    Right installations -> do
+      case installations of
+        [] -> do
+          -- No HsJupyter kernel installed
+          let status = ComponentStatus
+                { csComponent = KernelComponent
+                , csHealth = NotFoundComponent
+                , csVersion = Nothing
+                , csPath = Nothing
+                , csAccessible = True  -- Dirs exist but kernel not installed
+                , csFunctional = False
+                , csIssues = [Issue Minor KernelComponent "HsJupyter kernel not installed" Nothing]
+                , csLastCheck = checkTime
+                }
+          return $ Right status
+        (kernel:_) -> do
+          -- At least one installation found - analyze its health
+          let issues = analyzeKernelInstallation kernel
+              health = if null issues then HealthyComponent else HealthyWithWarningsComponent
+              functional = case kiStatus kernel of
+                Installed -> True
+                InstalledWithIssues _ -> True
+                _ -> False
+          let status = ComponentStatus
+                { csComponent = KernelComponent
+                , csHealth = health
+                , csVersion = Just (kiVersion kernel)
+                , csPath = Just (kiKernelspecPath kernel)
+                , csAccessible = True
+                , csFunctional = functional
+                , csIssues = issues
+                , csLastCheck = checkTime
+                }
+          return $ Right status
+  where
+    analyzeKernelInstallation kernel = case kiStatus kernel of
+      Installed -> []
+      InstalledWithIssues kerIssues -> kerIssues
+      NotInstalled -> [Issue Critical KernelComponent "Kernel not properly installed" Nothing]
+      Corrupted kerIssues -> Issue Critical KernelComponent "Kernel installation corrupted" Nothing : kerIssues
 
 -- | Check GHC component health
 checkGHCComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
@@ -500,23 +557,72 @@ calculateOverallHealth componentHealths criticalIssues majorIssues
 
 -- Placeholder helper functions (to be implemented in subsequent tasks)
 validateJupyterEnvironment :: JupyterEnvironment -> [Issue]
-validateJupyterEnvironment = const []  -- Placeholder
+validateJupyterEnvironment env =
+  let issues = []
+      -- Check if kernelspec directories are available
+      kernelspecIssues = if null (jeKernelspecDirs env)
+        then [Issue Warning JupyterComponent
+               "No kernelspec directories found"
+               (Just "Jupyter may not be properly configured")]
+        else []
+      -- Check if version information is available
+      versionIssues = if T.null (jvCore (jeVersion env))
+        then [Issue Minor JupyterComponent
+               "Jupyter version information not available"
+               Nothing]
+        else []
+  in issues ++ kernelspecIssues ++ versionIssues
 
 determineJupyterHealth :: JupyterEnvironment -> [Issue] -> ComponentHealth
 determineJupyterHealth _ [] = HealthyComponent
 determineJupyterHealth _ _ = HealthyWithWarningsComponent
 
 extractJupyterVersion :: JupyterEnvironment -> Maybe Text
-extractJupyterVersion = const Nothing  -- Placeholder
+extractJupyterVersion env =
+  -- Extract version from JupyterEnvironment
+  let version = jeVersion env
+      coreVersion = jvCore version
+  in if T.null coreVersion
+       then Nothing
+       else Just coreVersion
 
 findGHCExecutable :: IO (Maybe FilePath)
-findGHCExecutable = return Nothing  -- Placeholder
+findGHCExecutable = findExecutable "ghc"
 
 testGHCVersion :: FilePath -> IO (Either Text (Maybe Text))
-testGHCVersion = const $ return $ Right $ Just "9.12.2"  -- Placeholder
+testGHCVersion ghcPath = do
+  -- Run 'ghc --version' and capture the output
+  result <- readProcessWithExitCode ghcPath ["--version"] ""
+  case result of
+    (ExitFailure _, _, stderr) ->
+      return $ Left $ "Failed to run GHC: " <> T.pack stderr
+    (ExitSuccess, stdout, _) -> do
+      -- Parse version from output like "The Glorious Glasgow Haskell Compilation System, version 9.6.7"
+      let versionText = T.pack stdout
+          -- Extract version number after "version "
+          versionPart = case T.splitOn "version " versionText of
+            [_, versionNum] -> Just $ T.strip $ T.takeWhile (/= '\n') versionNum
+            _ -> Nothing
+      return $ Right versionPart
 
 testGHCFunctionality :: FilePath -> IO (Either Text (Maybe Text))
-testGHCFunctionality = const $ return $ Right $ Just "9.12.2"  -- Placeholder
+testGHCFunctionality ghcPath = do
+  -- First get version like testGHCVersion
+  versionResult <- testGHCVersion ghcPath
+  case versionResult of
+    Left err -> return $ Left err
+    Right version -> do
+      -- Test basic GHC functionality by running a simple expression
+      -- ghc -e "1 + 1"
+      funcResult <- readProcessWithExitCode ghcPath ["-e", "1 + 1"] ""
+      case funcResult of
+        (ExitFailure _, _, stderr) ->
+          return $ Left $ "GHC not functional: " <> T.pack stderr
+        (ExitSuccess, stdout, _) -> do
+          -- GHC works if it can evaluate the expression and return "2"
+          if "2" `T.isInfixOf` T.pack stdout
+            then return $ Right version
+            else return $ Left "GHC evaluation produced unexpected output"
 
 gatherSystemInformation :: IO SystemInformation
 gatherSystemInformation = do
