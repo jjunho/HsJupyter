@@ -84,6 +84,8 @@ import Data.Maybe (fromMaybe)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Time (getCurrentTime)
+import Data.Version (showVersion)
+import qualified Paths_hs_jupyter_kernel as Paths
 
 
 -- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
@@ -394,7 +396,7 @@ getVersionInformation options = withErrorContext "version-information" $ do
 
 -- | Get kernel version from current executable
 getKernelVersion :: IO Text
-getKernelVersion = return "0.1.0.0"  -- TODO: Extract from build-time information
+getKernelVersion = return $ T.pack $ showVersion Paths.version
 
 -- | Get build information
 getBuildInformation :: IO Text
@@ -923,11 +925,26 @@ filterValidKernelspecDirs dirs = filterAccessibleDirectories dirs
 -- | Enhance Python environment information with more details
 enhancePythonEnvironment :: PythonEnvironment -> IO PythonEnvironment
 enhancePythonEnvironment pythonEnv = do
-  -- TODO: Get actual Python version information
-  -- For now, return enhanced basic info (will be improved in subsequent tasks)
-  return pythonEnv
-    { peVersion = "3.x.x" -- Placeholder - will be detected properly
-    }
+  -- Get actual Python version by running python --version
+  versionResult <- readProcessWithExitCode (pePath pythonEnv) ["--version"] ""
+  let version = case versionResult of
+        (ExitSuccess, stdout, _) ->
+          -- Python 2 outputs to stderr, Python 3 to stdout
+          -- Output format: "Python 3.x.x"
+          let output = T.pack stdout
+              versionNum = case T.words output of
+                (_:v:_) -> v  -- "Python" "3.x.x"
+                _ -> "unknown"
+          in versionNum
+        (ExitSuccess, "", stderr) ->
+          -- Python 2 case
+          let output = T.pack stderr
+              versionNum = case T.words output of
+                (_:v:_) -> v
+                _ -> "unknown"
+          in versionNum
+        _ -> "unknown"
+  return pythonEnv { peVersion = version }
 
 -- | Validate detected Jupyter environment against install options (T015)
 validateJupyterEnvironment :: JupyterEnvironment -> InstallOptions -> IO (Either CLIDiagnostic JupyterEnvironment)
@@ -1014,11 +1031,24 @@ filterSystemDirectories dirs = do
       "/Library/" `T.isInfixOf` T.pack dir  -- macOS system directories-- | Validate Python environment compatibility with installation requirements
 validatePythonCompatibility :: PythonEnvironment -> InstallOptions -> IO (Either CLIDiagnostic PythonEnvironment)
 validatePythonCompatibility pythonEnv _options = do
-  -- TODO: Implement actual Python version checking and GHC compatibility validation
-  -- For T015, perform basic validation
+  -- Check if Python path is valid
   if pePath pythonEnv == ""
     then return $ Left $ ValidationError "Python executable not found"
-    else return $ Right pythonEnv
+    else do
+      -- Check Python version (require 3.6+)
+      let version = peVersion pythonEnv
+          versionParts = T.splitOn "." version
+      case versionParts of
+        (major:minor:_) -> do
+          case (T.unpack major, T.unpack minor) of
+            (majorStr, minorStr) | all (`elem` ("0123456789" :: String)) majorStr && all (`elem` ("0123456789" :: String)) minorStr -> do
+              let majorNum = read majorStr :: Int
+                  minorNum = read minorStr :: Int
+              if majorNum >= 3 && (majorNum > 3 || minorNum >= 6)
+                then return $ Right pythonEnv
+                else return $ Left $ ValidationError $ "Python version " <> version <> " is too old. Require Python 3.6 or later."
+            _ -> return $ Right pythonEnv  -- Can't parse version, proceed anyway
+        _ -> return $ Right pythonEnv  -- Can't parse version, proceed anyway
 
 -- ===========================================================================
 -- T016: Kernelspec Directory Discovery and Validation Functions
@@ -1206,19 +1236,21 @@ generateEnvironmentVariablesWithCustom options ghcPath =
 
 -- | Generate kernel metadata with constitutional compliance (T017)
 generateKernelMetadata :: InstallOptions -> Object
-generateKernelMetadata _options = KM.fromList
-  [ (K.fromText "kernel_version", String "0.1.0.0")
-  , (K.fromText "implementation", String "hs-jupyter-kernel")
-  , (K.fromText "implementation_version", String "0.1.0.0")
-  , (K.fromText "language_version", String "GHC 9.12.2+")
-  , (K.fromText "banner", String "HsJupyter - Haskell kernel for Jupyter notebooks")
-  , (K.fromText "help_links", Array $ V.fromList
-      [ object
-          [ ("text", String "HsJupyter Documentation")
-          , ("url", String "https://github.com/user/HsJupyter")
-          ]
-      ])
-  ]
+generateKernelMetadata _options =
+  let versionText = T.pack $ showVersion Paths.version
+  in KM.fromList
+    [ (K.fromText "kernel_version", String versionText)
+    , (K.fromText "implementation", String "hs-jupyter-kernel")
+    , (K.fromText "implementation_version", String versionText)
+    , (K.fromText "language_version", String "GHC 9.12.2+")
+    , (K.fromText "banner", String "HsJupyter - Haskell kernel for Jupyter notebooks")
+    , (K.fromText "help_links", Array $ V.fromList
+        [ object
+            [ ("text", String "HsJupyter Documentation")
+            , ("url", String "https://github.com/user/HsJupyter")
+            ]
+        ])
+    ]
 
 -- | Generate kernel metadata with custom configuration (T033: Phase 5 US3)
 generateKernelMetadataWithCustom :: InstallOptions -> Object
