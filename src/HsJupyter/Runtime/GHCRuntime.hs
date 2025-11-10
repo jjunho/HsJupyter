@@ -67,7 +67,6 @@ module HsJupyter.Runtime.GHCRuntime
 import Control.Concurrent.STM
 -- TMVar import removed: not needed here
 import Control.Exception (catch, evaluate)
-import Control.Monad.IO.Class
 import Data.Char (isDigit, isSpace)
 import Data.Int (Int64)
 import Data.List (isInfixOf, isPrefixOf)
@@ -76,13 +75,13 @@ import qualified Data.Text as T
 import Data.Time (NominalDiffTime, getCurrentTime, diffUTCTime, UTCTime)
 import GHC.Stats (getRTSStats, RTSStats(..))
 import System.Timeout (timeout)
-import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImports, runStmt)
+import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImportsQ, runStmt)
 
 import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, listDeclarations, addDeclaration, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..))
+import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..), truncateOutput)
 
 -- | Input structure for GHC evaluation operations
 data GHCEvaluationRequest = GHCEvaluationRequest
@@ -384,13 +383,13 @@ evaluateExpressionCancellable session code token = do
             imports <- atomically $ listImportedModules session
             
             interpreterResult <- runInterpreter $ do
-              -- Set up imports (including previously imported modules)
-              let allImports = "Prelude" : imports
-              setImports allImports
-              
+              -- Set up all imports (qualified and unqualified)
+              let importSpecs = map importStatementToQualified imports
+              setImportsQ $ ("Prelude", Nothing) : importSpecs
+
               -- Restore previous bindings by re-running declarations
               mapM_ runStmt decls
-              
+
               -- Wrap expression with 'show' to get String representation
               let wrappedCode = "show (" ++ T.unpack code ++ ")"
               interpret wrappedCode (as :: String)
@@ -404,8 +403,12 @@ evaluateExpressionCancellable session code token = do
       if cancelled
         then return $ Left (CompilationError "Operation was cancelled" (SourceLocation 1 1 Nothing) [])
         else return $ Left (TimeoutError timeoutSeconds)  -- Timeout occurred
-    Just (Left err) -> return $ Left err   -- Already converted interpreter error  
-    Just (Right value) -> return $ Right (T.pack value)     -- Success
+    Just (Left err) -> return $ Left err   -- Already converted interpreter error
+    Just (Right value) -> do
+      -- Apply output truncation based on resource budget
+      let outputLimit = fromIntegral $ rbMaxStreamBytes (resourceLimits $ sessionConfig session)
+      let truncated = truncateOutput outputLimit value
+      return $ Right (T.pack truncated)     -- Success
 
 -- | Execute a Haskell declaration with intelligent timeout selection
 evaluateDeclaration :: GHCSessionState -> Text -> IO (Either GHCError [String])
@@ -458,13 +461,13 @@ evaluateDeclarationCancellable session code token = do
         imports <- atomically $ listImportedModules session
         
         interpreterResult <- runInterpreter $ do
-          -- Set up imports (including previously imported modules)
-          let allImports = "Prelude" : imports
-          setImports allImports
-          
+          -- Set up all imports (qualified and unqualified)
+          let importSpecs = map importStatementToQualified imports
+          setImportsQ $ ("Prelude", Nothing) : importSpecs
+
           -- Restore previous bindings by re-running declarations
           mapM_ runStmt decls
-          
+
           -- Execute the new declaration using runStmt (for let bindings, function definitions)
           runStmt (T.unpack code)
         return $ case interpreterResult of
@@ -552,18 +555,19 @@ importModuleCancellable session importStatement token = do
                 currentImports <- atomically $ listImportedModules session
                 
                 interpreterResult <- runInterpreter $ do
-                  -- Set up imports (including the new module)
-                  let allImports = "Prelude" : currentImports ++ [moduleName]
-                  setImports allImports
-                  
+                  -- Set up all imports including the new one (qualified and unqualified)
+                  let previousImportSpecs = map importStatementToQualified currentImports
+                  let newImportSpec = importStatementToQualified importStatement
+                  setImportsQ $ ("Prelude", Nothing) : (previousImportSpecs ++ [newImportSpec])
+
                   -- Restore previous declarations
                   mapM_ runStmt currentDecls
-                  
+
                   return ()
                 return $ case interpreterResult of
                   Left err -> Left (interpretError err)
                   Right value -> Right value
-          
+
           case result of
             Nothing -> do
               -- Check if timeout or cancellation
@@ -573,8 +577,8 @@ importModuleCancellable session importStatement token = do
                 else return $ Left (TimeoutError timeoutSeconds)
             Just (Left err) -> return $ Left err   -- Already converted interpreter error
             Just (Right ()) -> do
-              -- Add to imported modules list (store canonical module name)
-              atomically $ addImportedModule session moduleName
+              -- Add to imported modules list (store full import statement)
+              atomically $ addImportedModule session importStatement
               return $ Right ()
 
 -- | Initialize a new GHC session with configuration
@@ -601,9 +605,16 @@ data ImportStatement = ImportStatement
 
 -- | Parse import statement to extract module name and qualification info
 parseImportStatement :: String -> (String, Bool)
-parseImportStatement stmt = 
+parseImportStatement stmt =
   let parsed = parseImportStatementFull stmt
   in (importModuleName parsed, importQualified parsed)
+
+-- | Convert import statement to setImportsQ format
+-- Returns (ModuleName, Maybe Alias) for use with setImportsQ
+importStatementToQualified :: String -> (String, Maybe String)
+importStatementToQualified stmt =
+  let parsed = parseImportStatementFull stmt
+  in (importModuleName parsed, importAlias parsed)
 
 -- | Parse import statement into full structure
 parseImportStatementFull :: String -> ImportStatement
