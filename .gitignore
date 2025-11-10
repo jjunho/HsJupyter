@@ -78,3 +78,5 @@ docs.txt
 
 .local/
 .ipynb_checkpoints/
+
+.claude/commands
