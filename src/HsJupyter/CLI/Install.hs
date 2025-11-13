@@ -1121,7 +1121,8 @@ findCustomJupyterDirs = do
     Just paths -> do
       -- Split by colon on Unix systems (TODO: Handle Windows semicolon)
       let pathList = T.split (== ':') (T.pack paths)
-      return $ map (</> "kernels") $ map T.unpack pathList
+      -- Optimized: fuse two maps into single map
+      return $ map ((</> "kernels") . T.unpack) pathList
 
 -- | Ensure directory exists, creating it if necessary (T016)
 ensureDirectoryExists :: FilePath -> IO (Either CLIDiagnostic FilePath)

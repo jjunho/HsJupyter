@@ -91,6 +91,7 @@ findBestInstallationDirectory dirs = do
 "Uninstalled " ++ show totalSuccesses ++ " kernel(s)"
 baseArgs ++ customArgs ++ timeoutArgs
 allDirs = standardDirs ++ condaEnvDirs ++ customDirs
+map (</> "kernels") $ map T.unpack pathList  -- Double map traversal
 ```
 
 **After:**
@@ -99,11 +100,13 @@ allDirs = standardDirs ++ condaEnvDirs ++ customDirs
 "Uninstalled " <> show totalSuccesses <> " kernel(s)"
 baseArgs <> customArgs <> timeoutArgs
 allDirs = standardDirs <> condaEnvDirs <> customDirs
+map ((</> "kernels") . T.unpack) pathList  -- Fused map
 ```
 
 **Improvements:**
 - Using `<>` (Semigroup) instead of `++` enables better GHC optimization
 - Allows for list fusion in many cases
+- Map fusion reduces traversals from 2 to 1
 - More consistent with modern Haskell idioms
 - Particularly effective for String operations where GHC can optimize away intermediate allocations
 - **Estimated 10-30% improvement** in string concatenation heavy code paths
