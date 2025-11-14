@@ -11,8 +11,8 @@ module HsJupyter.Bridge.JupyterBridge
 
 import           Data.Aeson (Value)
 import           Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
-import           Data.Text (Text)
 import qualified Katip as K
+import           System.IO (stdout)
 
 import           HsJupyter.Bridge.Protocol.Envelope (ProtocolEnvelope)
 import           HsJupyter.Bridge.Types
@@ -28,10 +28,25 @@ data BridgeContext = BridgeContext
   , logEnv         :: K.LogEnv
   }
 
+-- | Convert our LogLevel to Katip's Severity.
+-- This mapping ensures that the log level configured via --log-level flag
+-- or HSJUPYTER_LOG_LEVEL environment variable is properly respected.
+-- Fix for: Kernel was ignoring log level configuration and defaulting to warnings only.
+toKatipSeverity :: LogLevel -> K.Severity
+toKatipSeverity LogDebug = K.DebugS
+toKatipSeverity LogInfo  = K.InfoS
+toKatipSeverity LogWarn  = K.WarningS
+toKatipSeverity LogError = K.ErrorS
+
+-- | Create bridge context with properly configured logging.
+-- Creates a Katip LogEnv with the log level from KernelProcessConfig,
+-- ensuring shell loop and other kernel components log at the configured level.
 mkBridgeContext :: KernelProcessConfig -> RuntimeManager -> IO BridgeContext
 mkBridgeContext cfg manager = do
   rejectedVar <- newIORef 0
-  le <- K.initLogEnv "hs-jupyter" "kernel"
+  -- Create scribe that filters messages based on configured log level
+  handleScribe <- K.mkHandleScribe K.ColorIfTerminal stdout (K.permitItem (toKatipSeverity (logLevel cfg))) K.V2
+  le <- K.registerScribe "stdout" handleScribe K.defaultScribeSettings =<< K.initLogEnv "hs-jupyter" "kernel"
   pure BridgeContext
     { bridgeConfig = cfg
     , bridgeManager = manager

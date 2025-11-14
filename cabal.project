@@ -1,7 +1,6 @@
 packages: .
 
 write-ghc-environment-files: always
-jobs: 8
 -- Performance optimizations
 jobs: 4
 documentation: False
@@ -9,3 +8,7 @@ haddock-all: False
 optimization: 1
 split-sections: True
 test-show-details: always
+
+-- Use faster linker (gold is available on this system)
+program-options
+  ghc-options: -optl-fuse-ld=gold

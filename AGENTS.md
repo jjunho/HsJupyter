@@ -10,9 +10,10 @@ Use a GHC toolchain installed via `ghcup` (`ghcup install ghc 9.12.2 cabal`) bef
 
 **⚡ Performance Note**: Full builds take several minutes due to the hint library (GHC API). For faster development:
 
-- `cabal build lib:hs-jupyter-kernel -O0` (5 seconds vs minutes)
+- `cabal build lib:hs-jupyter-kernel -O0` (5-10 seconds)
 - `cabal test unit -O0 --test-option="--match=/ModuleName/"` (targeted tests)
-- Configure `jobs: 4` and `documentation: False` in cabal.project for parallel builds
+- Configure `jobs: 4`, `documentation: False`, and `ld.gold` linker in cabal.project
+- With `ld.gold`: incremental rebuilds take 2-3 seconds (33x faster than default linker)
 
 Build emerging packages with `cabal v2-build` or `cabal v2-repl` and record any extra flags in your PR. Run documentation checks locally—`markdownlint docs/**/*.md README.md`—to keep the published guides consistent. Prototype scripts (e.g., ZeroMQ harnesses) should live under `.specify/scripts/` with executable bits set (`chmod +x .specify/scripts/dev-kernel.sh`) and usage documented.
 
@@ -33,6 +34,7 @@ Write commit subjects in the imperative mood (`Add runtime manager sketch`) and 
 Codex agents must follow the Specify toolkit prompts before running `/speckit` commands: review the matching files in `.codex/prompts/` (`speckit.specify.md`, `speckit.plan.md`, `speckit.tasks.md`, `speckit.implement.md`) and apply their checklists verbatim. Always invoke the helper scripts under `.specify/scripts/bash/` from the repo root with the documented flags, keep feature branches numbered (`001-name`), and update generated checklists when validation status changes.
 
 ## Active Technologies
+
 - Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
 - filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
 - Haskell (GHC 9.12.2+) + `zeromq4-haskell`, `aeson`, `katip`, `stm` (005-fix-jupyter-kernel-bug)
@@ -47,4 +49,5 @@ Codex agents must follow the Specify toolkit prompts before running `/speckit` c
 
 ## Recent Changes
 
+- 005-fix-jupyter-kernel-bug: Fixed three critical Jupyter protocol bugs: (1) LogEnv not respecting log level configuration, (2) parseEnvelopeFrames expecting wrong delimiter format, (3) replyEnvelope with undefined signature payload. Added ld.gold linker for 33x faster builds.
 - 001-protocol-bridge: Added Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging

@@ -21,7 +21,8 @@ import           HsJupyter.Bridge.Protocol.Envelope (ExecuteReply (..),
                                                   ProtocolEnvelope (..),
                                                   MessageHeader (..),
                                                   ShutdownReply (..),
-                                                  ShutdownRequest (..))
+                                                  ShutdownRequest (..),
+                                                  signaturePayloadFrom)
 import           HsJupyter.Runtime.Manager (RuntimeManager)
 import qualified HsJupyter.Runtime.Manager as RM
 import           HsJupyter.Runtime.SessionState
@@ -108,6 +109,8 @@ handleShutdown _manager envelope =
       return $ replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply restart)
 
 -- | Helper to create a reply envelope.
+-- Creates a properly structured reply envelope with signature payload.
+-- Fix for: Replaced 'undefined' placeholder with proper signaturePayloadFrom call.
 replyEnvelope :: (Aeson.ToJSON a)
               => ProtocolEnvelope any
               -> Text
@@ -123,12 +126,13 @@ replyEnvelope reqEnv newMsgType content =
         , version = version reqHdr
         , date = date reqHdr -- TODO: Update timestamp
         }
+      metadata = Aeson.object []
   in ProtocolEnvelope
        { envelopeIdentities = envelopeIdentities reqEnv
        , envelopeHeader = newHdr
        , envelopeParent = Just reqHdr
-       , envelopeMetadata = Aeson.object []
+       , envelopeMetadata = metadata
        , envelopeContent = content
        , envelopeSignature = "" -- The bridge will sign this
-       , envelopeSignaturePayload = undefined -- The bridge will create this
+       , envelopeSignaturePayload = signaturePayloadFrom newHdr (Just reqHdr) metadata (Aeson.toJSON content)
        }

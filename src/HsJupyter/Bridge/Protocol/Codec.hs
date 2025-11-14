@@ -11,13 +11,13 @@ module HsJupyter.Bridge.Protocol.Codec
 
 import           Data.Aeson (Value, (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 import           Data.Bifunctor (first)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as B64
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import           Control.Monad (when)
 
 import           HsJupyter.Bridge.Protocol.Envelope
 import           HsJupyter.Bridge.Protocol.Signature (computeSignature, verifySignature)
@@ -47,10 +47,16 @@ newtype EnvelopeFrameError = EnvelopeFrameError Text
   deriving (Eq, Show)
 
 -- | Parse a multipart ZeroMQ message into a protocol envelope.
+-- Accepts both Jupyter standard delimiter (empty frame) and legacy <IDS|MSG> string.
+-- 
+-- Jupyter protocol uses an empty frame as delimiter between identity frames
+-- and message payload. This was fixed to accept both formats for compatibility.
+-- Fix for: Kernel was rejecting all messages due to expecting wrong delimiter format.
 parseEnvelopeFrames :: [BS.ByteString] -> Either EnvelopeFrameError (ProtocolEnvelope Value)
 parseEnvelopeFrames frames = do
-  -- Find the delimiter
-  let (ids, rest) = break (== TE.encodeUtf8 "<IDS|MSG>") frames
+  -- Find the delimiter (empty frame or <IDS|MSG>)
+  let isDelimiter frame = BS.null frame || frame == TE.encodeUtf8 "<IDS|MSG>"
+      (ids, rest) = break isDelimiter frames
   
   -- Check for delimiter and correct number of payload frames
   case rest of
@@ -59,13 +65,13 @@ parseEnvelopeFrames frames = do
         [sig, hdr, parent, meta, content] -> do
           parsePayload ids sig hdr parent meta content
         _ -> Left $ EnvelopeFrameError $ "Invalid payload frame count: " <> T.pack (show (length payload))
-    _ -> Left $ EnvelopeFrameError "Missing <IDS|MSG> delimiter"
+    _ -> Left $ EnvelopeFrameError "Missing delimiter (empty frame or <IDS|MSG>)"
 
   where
     parsePayload identities sigBS headerBS parentBS metadataBS contentBS = do
       signature   <- decodeUtf8 sigBS
       header      <- decodeJSON "header" headerBS
-      parentHeader <- decodeJSON "parent" parentBS
+      parentHeader <- decodeParentHeader parentBS
       metadata    <- decodeValue "metadata" metadataBS
       content     <- decodeValue "content" contentBS
       let payload = SignaturePayload
@@ -91,6 +97,19 @@ parseEnvelopeFrames frames = do
 
     decodeValue :: Text -> BS.ByteString -> Either EnvelopeFrameError Value
     decodeValue = decodeJSON
+    
+    -- | Decode parent header, accepting empty object as Nothing.
+    -- Jupyter protocol allows empty parent_header ({}) for initial messages
+    -- that are not replies to previous messages.
+    -- Fix for: Kernel was failing to parse messages with empty parent_header.
+    decodeParentHeader :: BS.ByteString -> Either EnvelopeFrameError (Maybe MessageHeader)
+    decodeParentHeader bs = do
+      value <- decodeValue "parent_value" bs
+      case value of
+        Aeson.Object obj | KM.null obj -> Right Nothing  -- Empty object = no parent
+        _ -> case Aeson.fromJSON value of
+               Aeson.Success hdr -> Right (Just hdr)
+               Aeson.Error err -> Left $ EnvelopeFrameError $ "Failed to decode parent: " <> T.pack err
 
 -- | Render a protocol envelope into ZeroMQ multipart frames (identities + delimiter + HMAC + JSON payloads).
 renderEnvelopeFrames :: BS.ByteString -> ProtocolEnvelope Value -> [BS.ByteString]
@@ -103,4 +122,4 @@ renderEnvelopeFrames key env =
       metadataFrame  = spMetadata payload
       contentFrame   = spContent payload
   in envelopeIdentities env
-      ++ [TE.encodeUtf8 "<IDS|MSG>", signatureFrame, headerFrame, parentFrame, metadataFrame, contentFrame]
+      ++ [BS.empty, signatureFrame, headerFrame, parentFrame, metadataFrame, contentFrame]  -- Use empty frame as delimiter
