@@ -7,7 +7,7 @@ module HsJupyter.Runtime.Evaluation
 
 import Control.Concurrent.STM (tryReadTMVar, atomically)
 -- MVar not needed here; concurrent coordination uses STM in this module
-import Data.Aeson (Value(..))
+import Data.Aeson (object, (.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Text (Text)
@@ -15,9 +15,8 @@ import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
 import HsJupyter.Runtime.Diagnostics (mkInfo)
-import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, importModule, defaultGHCConfig)
-import HsJupyter.Runtime.ResourceGuard (truncateOutput)
-import HsJupyter.Runtime.GHCSession (newGHCSession, GHCSessionState(..), GHCConfig(..))
+import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, ghcConfigFromBudget)
+import HsJupyter.Runtime.GHCSession (newGHCSession, cleanupSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
 import System.IO.Unsafe (unsafePerformIO)
 import HsJupyter.Runtime.SessionState
@@ -29,6 +28,7 @@ import HsJupyter.Runtime.SessionState
   , RuntimeSessionState(..)
   , StreamChunk(..)
   , StreamName(..)
+  , ResourceBudget(..)
   , incrementExecutionCount
   , rssExecutionCount
   )
@@ -37,35 +37,27 @@ import HsJupyter.Runtime.SessionState
 -- This is a temporary solution for Phase 4. In a production system,
 -- this would be managed per-user session with proper cleanup.
 {-# NOINLINE globalGHCSession #-}
-globalGHCSession :: IORef (Maybe GHCSessionState)
+globalGHCSession :: IORef (Maybe (ResourceBudget, GHCSessionState))
 globalGHCSession = unsafePerformIO (newIORef Nothing)
 
--- | Get or create the persistent GHC session with the given resource budget
--- Note: This recreates the session if the budget changes, which loses state.
--- This is a temporary solution. In production, we should either:
--- 1. Pass budget separately to evaluation functions (without recreating session)
--- 2. Use a TVar for session config to update it without losing state
+-- | Get or create the persistent GHC session
 getOrCreateGHCSession :: ResourceBudget -> IO GHCSessionState
 getOrCreateGHCSession budget = do
   maybeSession <- readIORef globalGHCSession
   case maybeSession of
-    Just session -> do
-      -- Check if the session's budget matches the requested budget
-      let currentBudget = resourceLimits (sessionConfig session)
-      if currentBudget == budget
-        then return session  -- Reuse existing session
-        else do
-          -- Budget changed, need to recreate session (loses state!)
-          let config = defaultGHCConfig { resourceLimits = budget }
-          newSession <- atomically $ newGHCSession config
-          writeIORef globalGHCSession (Just newSession)
-          return newSession
-    Nothing -> do
-      -- Create new session with the provided budget
-      let config = defaultGHCConfig { resourceLimits = budget }
+    Just (savedBudget, session)
+      | savedBudget == budget -> pure session
+      | otherwise -> do
+          atomically (cleanupSession session)
+          createSession
+    Nothing -> createSession
+  where
+    createSession = do
+      -- Create new session with config derived from the runtime budget
+      let config = ghcConfigFromBudget budget
       session <- atomically $ newGHCSession config
-      writeIORef globalGHCSession (Just session)
-      return session
+      writeIORef globalGHCSession (Just (budget, session))
+      pure session
 
 -- | Determine if code is an import statement
 isImport :: Text -> Bool
@@ -157,11 +149,10 @@ runEchoEvaluation
   -> ExecutionJob
   -> IO (ExecutionOutcome, RuntimeSessionState)
 runEchoEvaluation newState executionCount job = do
-  -- Apply output truncation based on resource budget
-  let outputLimit = fromIntegral $ rbMaxStreamBytes (rssResourceBudget newState)
-      sourceText = T.unpack (jobSource job)
-      truncated = T.pack $ truncateOutput outputLimit sourceText
-      stream = StreamChunk StreamStdout truncated
+  let payload = object
+        [ "text/plain" .= jobSource job
+        ]
+      stream = StreamChunk StreamStdout (jobSource job)
       outcome = ExecutionOutcome
         { outcomeStatus = ExecutionOk
         , outcomeStreams = [stream]
@@ -179,8 +170,9 @@ runGHCEvaluation
   -> ExecutionJob
   -> IO (ExecutionOutcome, RuntimeSessionState)
 runGHCEvaluation newState executionCount job = do
-  -- Get or create persistent GHC session with the resource budget from runtime state
-  ghcSession <- getOrCreateGHCSession (rssResourceBudget newState)
+  -- Get or create persistent GHC session respecting runtime budget
+  let budget = rssResourceBudget newState
+  ghcSession <- getOrCreateGHCSession budget
   
   -- Handle import statements separately
   result <- if isImport (jobSource job)
@@ -215,10 +207,11 @@ runGHCEvaluation newState executionCount job = do
     
     Right value -> do
       let stream = StreamChunk StreamStdout value
+          payload = object ["text/plain" .= value]
           outcome = ExecutionOutcome
             { outcomeStatus = ExecutionOk
             , outcomeStreams = [stream]
-            , outcomePayload = [String value]  -- Simple String payload for now
+            , outcomePayload = [payload]
             , outcomeDiagnostics = [mkInfo "GHC evaluation successful"]
             , outcomeExecutionCount = executionCount
             , outcomeDuration = 0  -- Will be set by caller

@@ -40,42 +40,46 @@ common project-settings
     -Wincomplete-record-updates -Wredundant-constraints
 
   build-depends:
-    , aeson                 >=2.0      && <2.3
-    , aeson-pretty          >=0.8      && <0.9
-    , async                 >=2.2      && <2.3
-    , base                  >=4.14     && <5
-    , bytestring            >=0.10     && <0.13
-    , containers            >=0.6      && <0.8
-    , cryptonite            >=0.30     && <0.31
-    , directory             >=1.3      && <1.4
-    , exceptions            >=0.10     && <0.11
-    , filepath              >=1.4      && <1.6
-    , ghc                   >=9.0      && <9.13
-    , hint                  >=0.9      && <0.10
-    , mtl                   >=2.2      && <2.4
-    , optparse-applicative  >=0.16     && <0.19
-    , process               >=1.6      && <1.7
-    , random                >=1.2      && <1.3
-    , stm                   >=2.5      && <2.6
-    , temporary             >=1.3      && <1.4
-    , text                  >=1.2      && <2.2
-    , time                  >=1.9      && <1.15
-    , transformers          >=0.5      && <0.7
-    , unix                  >=2.7      && <2.9
-    , unordered-containers  >=0.2      && <0.3
-    , uuid                  >=1.3      && <1.4
-    , vector                >=0.12     && <0.14
-    , zeromq4-haskell       >=0.8      && <0.9
+    , aeson                 >=2.0
+    , aeson-casing
+    , aeson-pretty
+    , async
+    , base                  >=4.14 && <5
+    , base64-bytestring
+    , bytestring
+    , containers
+    , exceptions
+    , cryptonite
+    , directory
+    , filepath
+    , optparse-applicative  >=0.16
+    , process
+    , unix
+    , zeromq4-haskell
+    , katip
+    , hint
+
+    , mtl
+    , random
+    , stm
+    , text
+    , time
+    , temporary
+    , transformers
+    , unordered-containers
+    , uuid
+    , vector
 
 library
   import:             project-settings
   exposed-modules:     HsJupyter.KernelProcess
-                     , HsJupyter.Bridge.JupyterBridge
+                     , HsJupyter.Bridge.Types
                      , HsJupyter.Bridge.HeartbeatThread
                      , HsJupyter.Bridge.Protocol.Codec
+                     , HsJupyter.Bridge.Protocol.Signature
                      , HsJupyter.Bridge.Protocol.Envelope
                      , HsJupyter.Kernel.Types
-                     , HsJupyter.Router.RequestRouter
+                     , HsJupyter.Router
                      , HsJupyter.Runtime.Manager
                      , HsJupyter.Runtime.EchoRuntime
                      , HsJupyter.Runtime.GHCRuntime
@@ -93,6 +97,7 @@ library
                      , HsJupyter.CLI.Output
                      , HsJupyter.CLI.Types
                      , HsJupyter.CLI.Utilities
+                     , HsJupyter.Bridge.JupyterBridge
 
   hs-source-dirs:     src
   other-modules:      Paths_hs_jupyter_kernel

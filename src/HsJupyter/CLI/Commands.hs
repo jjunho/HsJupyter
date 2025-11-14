@@ -117,10 +117,6 @@ defaultInstallOptions = InstallOptions
   , ioConnectionTimeout = Nothing     -- Use Jupyter default timeout
   }
 
--- Note: Default option values are defined here for documentation purposes
--- but are not exported. They serve as reference for the option parsers below.
-
--- | Parse CLI commands
 
 -- | Top-level CLI commands with Phase 6 US4 enhancements
 data CLICommand
@@ -135,8 +131,8 @@ data CLICommand
 parseCommand :: [String] -> Either String CLICommand
 parseCommand args = 
   let parser = commandParser
-      customPrefs = defaultPrefs { prefShowHelpOnError = True, prefHelpLongEquals = True }
-      result = execParserPure customPrefs (info parser cmdHelp) args
+      parserPrefs = defaultPrefs { prefShowHelpOnError = True, prefHelpLongEquals = True }
+      result = execParserPure parserPrefs (info parser cmdHelp) args
   in case result of
        Options.Applicative.Success cmd -> Right cmd
        Options.Applicative.Failure failure -> Left $ show failure
@@ -288,4 +284,3 @@ versionOptionsParser = VersionOptions
 -- | Help text for CLI
 cmdHelp :: InfoMod a
 cmdHelp = briefDesc <> header "hs-jupyter-kernel - Install and manage Haskell Jupyter kernels"
-

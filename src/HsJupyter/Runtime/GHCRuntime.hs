@@ -61,6 +61,7 @@ module HsJupyter.Runtime.GHCRuntime
   , GHCEvaluationRequest(..)
   , GHCEvaluationResult(..)
   , EvaluationType(..)
+  , ghcConfigFromBudget
   , defaultGHCConfig
   ) where
 
@@ -69,19 +70,19 @@ import Control.Concurrent.STM
 import Control.Exception (catch, evaluate)
 import Data.Char (isDigit, isSpace)
 import Data.Int (Int64)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isInfixOf, isPrefixOf, nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime, getCurrentTime, diffUTCTime, UTCTime)
 import GHC.Stats (getRTSStats, RTSStats(..))
 import System.Timeout (timeout)
-import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImportsQ, runStmt)
+import Language.Haskell.Interpreter (runInterpreter, interpret, as, setImports, runStmt)
 
-import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, listDeclarations, addDeclaration, extractBindingNames, addBinding, addImportedModule, listImportedModules, checkImportPolicy, defaultSafeModules)
+import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportPolicy(..), ImportDefault(..), newGHCSession, cleanupSession, listBindings, extractBindingNames, addBinding, addImportedModule, listImportedModules, recordDeclaration, listDeclarations, checkImportPolicy, defaultSafeModules)
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..), truncateOutput)
+import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..))
 
 -- | Input structure for GHC evaluation operations
 data GHCEvaluationRequest = GHCEvaluationRequest
@@ -348,7 +349,7 @@ evaluateExpressionMemoryLimited session code = do
 evaluateExpressionGuarded :: GHCSessionState -> Text -> IO (Either GHCError Text)
 evaluateExpressionGuarded session code = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \_guard -> do
+  result <- withResourceGuard resourceLims $ \_ -> do
     token <- atomically newCancellationToken
     evaluateExpressionCancellable session code token
       `catch` \(violation :: ResourceViolation) -> 
@@ -378,18 +379,12 @@ evaluateExpressionCancellable session code token = do
                   Right () -> return $ Right "" -- import succeeded, return empty string as expression result
               Nothing -> return $ Left (CompilationError (T.pack ("Unsupported GHCi command: " ++ cmd)) (SourceLocation 1 1 Nothing) [])
           else do
-            -- Get current session state to restore bindings and imports
-            decls <- atomically $ listDeclarations session
-            imports <- atomically $ listImportedModules session
-            
             interpreterResult <- runInterpreter $ do
-              -- Set up all imports (qualified and unqualified)
-              let importSpecs = map importStatementToQualified imports
-              setImportsQ $ ("Prelude", Nothing) : importSpecs
-
-              -- Restore previous bindings by re-running declarations
-              mapM_ runStmt decls
-
+              baseImports <- liftIO $ atomically $ listImportedModules session
+              let activeImports = nub ("Prelude" : baseImports)
+              setImports activeImports
+              recordedDecls <- liftIO $ atomically $ listDeclarations session
+              mapM_ (runStmt . T.unpack) recordedDecls
               -- Wrap expression with 'show' to get String representation
               let wrappedCode = "show (" ++ T.unpack code ++ ")"
               interpret wrappedCode (as :: String)
@@ -439,7 +434,7 @@ evaluateDeclarationMemoryLimited session code = do
 evaluateDeclarationGuarded :: GHCSessionState -> Text -> IO (Either GHCError [String])
 evaluateDeclarationGuarded session code = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \_guard -> do
+  result <- withResourceGuard resourceLims $ \_ -> do
     token <- atomically newCancellationToken
     evaluateDeclarationCancellable session code token
       `catch` \(violation :: ResourceViolation) ->
@@ -461,14 +456,12 @@ evaluateDeclarationCancellable session code token = do
         imports <- atomically $ listImportedModules session
         
         interpreterResult <- runInterpreter $ do
-          -- Set up all imports (qualified and unqualified)
-          let importSpecs = map importStatementToQualified imports
-          setImportsQ $ ("Prelude", Nothing) : importSpecs
-
-          -- Restore previous bindings by re-running declarations
-          mapM_ runStmt decls
-
-          -- Execute the new declaration using runStmt (for let bindings, function definitions)
+          baseImports <- liftIO $ atomically $ listImportedModules session
+          let activeImports = nub ("Prelude" : baseImports)
+          setImports activeImports
+          recordedDecls <- liftIO $ atomically $ listDeclarations session
+          mapM_ (runStmt . T.unpack) recordedDecls
+          -- Execute the declaration using runStmt (for let bindings, function definitions)
           runStmt (T.unpack code)
         return $ case interpreterResult of
           Left err -> Left (interpretError err)
@@ -484,10 +477,9 @@ evaluateDeclarationCancellable session code token = do
     Just (Right _) -> do
       -- Extract binding names and update session state
       let bindingNames = extractBindingNames code
-          declCode = T.unpack code
       atomically $ do
         mapM_ (addBinding session) bindingNames
-        addDeclaration session declCode  -- Store the full declaration for replay
+        recordDeclaration session (T.strip code)
       return $ Right bindingNames
 
 -- | Import a Haskell module with security policy checking
@@ -520,7 +512,7 @@ importModuleMemoryLimited session importStatement = do
 importModuleGuarded :: GHCSessionState -> String -> IO (Either GHCError ())
 importModuleGuarded session importStatement = do
   let resourceLims = resourceBudgetToLimits (resourceLimits $ sessionConfig session)
-  result <- withResourceGuard resourceLims $ \_guard -> do
+  result <- withResourceGuard resourceLims $ \_ -> do
     token <- atomically newCancellationToken
     importModuleCancellable session importStatement token
       `catch` \(violation :: ResourceViolation) ->
@@ -555,14 +547,11 @@ importModuleCancellable session importStatement token = do
                 currentImports <- atomically $ listImportedModules session
                 
                 interpreterResult <- runInterpreter $ do
-                  -- Set up all imports including the new one (qualified and unqualified)
-                  let previousImportSpecs = map importStatementToQualified currentImports
-                  let newImportSpec = importStatementToQualified importStatement
-                  setImportsQ $ ("Prelude", Nothing) : (previousImportSpecs ++ [newImportSpec])
-
-                  -- Restore previous declarations
-                  mapM_ runStmt currentDecls
-
+                  -- Get current imports and add the new module
+                  currentImports <- liftIO $ atomically $ listImportedModules session
+                  -- setImports expects a list of module NAMES (e.g. "Data.List"), not full import statements
+                  let activeImports = nub ("Prelude" : currentImports ++ [moduleName])
+                  setImports activeImports
                   return ()
                 return $ case interpreterResult of
                   Left err -> Left (interpretError err)
@@ -577,8 +566,8 @@ importModuleCancellable session importStatement token = do
                 else return $ Left (TimeoutError timeoutSeconds)
             Just (Left err) -> return $ Left err   -- Already converted interpreter error
             Just (Right ()) -> do
-              -- Add to imported modules list (store full import statement)
-              atomically $ addImportedModule session importStatement
+              -- Add to imported modules list (store canonical module name)
+              atomically $ addImportedModule session moduleName
               return $ Right ()
 
 -- | Initialize a new GHC session with configuration
@@ -623,19 +612,10 @@ parseImportStatementFull stmt =
       tokens = words cleanStmt
   in case tokens of
     -- import qualified ModuleName
-    ["import", "qualified", moduleName] -> 
-      ImportStatement moduleName True Nothing Nothing
-    -- import qualified ModuleName as Alias
-    ["import", "qualified", moduleName, "as", alias] -> 
-      ImportStatement moduleName True (Just alias) Nothing
-    -- import ModuleName
-    ["import", moduleName] -> 
-      ImportStatement moduleName False Nothing Nothing
-    -- import ModuleName as Alias
-    ["import", moduleName, "as", alias] -> 
-      ImportStatement moduleName False (Just alias) Nothing
-    -- import ModuleName (selective imports)
-    ("import":moduleName:rest) | not (null rest) -> 
+    ("import":"qualified":moduleName:rest) -> 
+      let (selective, alias) = parseSelectiveAndAlias (unwords rest)
+      in ImportStatement moduleName True alias selective
+    ("import":moduleName:rest) -> 
       let (selective, alias) = parseSelectiveAndAlias (unwords rest)
       in ImportStatement moduleName False alias selective
     -- Just the module name (assume simple import)
@@ -730,15 +710,12 @@ isSimpleExpression :: String -> Bool
 isSimpleExpression code = 
   let trimmed = filter (not . isSpace) code
       isShort = length code < 50
-      -- Safe check for string literals without multiple traversals
-      isStringLiteral = case trimmed of
-        ('"':rest) -> case reverse rest of
-          ('"':_) -> True
-          _ -> False
+      quoteLiteral = case trimmed of
+        ('"':body@(_:_)) -> last body == '"'
         _ -> False
-      isLiteral = all isDigit trimmed || 
-                  isStringLiteral ||
-                  trimmed `elem` (["True", "False"] :: [String])
+      isLiteral = all isDigit trimmed
+                || quoteLiteral
+                || trimmed `elem` (["True", "False"] :: [String])
       isBasicArithmetic = all (\c -> isDigit c || c `elem` ("+-*/() " :: String)) code
   in isShort && (isLiteral || isBasicArithmetic)
 
@@ -764,14 +741,14 @@ isSimpleDeclaration code =
 countChar :: Char -> String -> Int
 countChar c = foldl' (\acc x -> if x == c then acc + 1 else acc) 0
 
--- | Default GHC configuration with differentiated timeouts
-defaultGHCConfig :: GHCConfig
-defaultGHCConfig = GHCConfig
+-- | Build a GHC configuration based on the runtime resource budget
+ghcConfigFromBudget :: ResourceBudget -> GHCConfig
+ghcConfigFromBudget budget = GHCConfig
   { expressionTimeout = 5       -- 5 seconds for regular expressions
   , compilationTimeout = 10     -- 10 seconds for imports/compilation
   , computationTimeout = 30     -- 30 seconds for complex computations
   , importPolicy = defaultSafePolicy
-  , resourceLimits = defaultResourceBudget
+  , resourceLimits = budget
   }
   where
     -- Safe default import policy - allow safe modules, deny system modules by default
@@ -781,7 +758,11 @@ defaultGHCConfig = GHCConfig
       , defaultPolicy = Deny
       , systemModulesAllowed = False
       }
-    
+
+-- | Default configuration used when no explicit budget is provided
+defaultGHCConfig :: GHCConfig
+defaultGHCConfig = ghcConfigFromBudget defaultResourceBudget
+  where
     -- Default resource budget - generous for development
     defaultResourceBudget = ResourceBudget
       { rbCpuTimeout = 30.0

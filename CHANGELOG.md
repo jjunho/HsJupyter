@@ -1,185 +1,138 @@
 # Changelog
 
-All notable changes to HsJupyter will be documented in this file.
+All notable changes to the HsJupyter kernel project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-
-- Documentation updates (README, roadmap, architecture guides)
-- Enhanced Haddock documentation for core modules
-- Improved code quality (DRY, KISS, YAGNI compliance)
-
 ### Fixed
 
-- Code violations of DRY, KISS, and YAGNI principles
-- Test reliability and correctness improvements
-- Import handling in diagnostics and resource guard modules
+- **Critical: Kernel communication protocol bugs** (2025-11-14, branch `005-fix-jupyter-kernel-bug`)
+  - Fixed three bugs preventing Jupyter protocol message exchange:
+    1. **LogEnv configuration**: `mkBridgeContext` now properly respects log level from `--log-level` flag and `HSJUPYTER_LOG_LEVEL` environment variable by using `toKatipSeverity` converter and `permitItem` filtering
+    2. **Protocol delimiter parsing**: `parseEnvelopeFrames` now accepts empty frame (`b''`) as delimiter per Jupyter protocol specification, in addition to legacy `<IDS|MSG>` string
+    3. **Reply envelope construction**: `replyEnvelope` uses `signaturePayloadFrom` to construct valid signature payloads instead of `undefined` placeholder
+  - Result: Kernel successfully receives `kernel_info_request` and sends `kernel_info_reply`, establishing working Jupyter protocol communication
+
+### Changed
+
+- **Build performance optimization** (2025-11-14)
+  - Configured `ld.gold` linker in `cabal.project` for dramatically faster builds
+  - Incremental builds: 77s → 2.3s (33x speedup)
+  - Full clean builds: ~18s with `-O0`
+
+### Technical Details
+
+- Modified `src/HsJupyter/Bridge/JupyterBridge.hs`: Added `toKatipSeverity`, `mkHandleScribe`, and `registerScribe`
+- Modified `src/HsJupyter/Bridge/Protocol/Codec.hs`: Updated delimiter detection, added `decodeParentHeader`
+- Modified `src/HsJupyter/Router.hs`: Fixed `replyEnvelope` signature payload
+- Modified `cabal.project`: Added `ld.gold` linker configuration
+
+## [0.4.0] - 2025-11-10
 
 ### Added
 
-- CHANGELOG.md and CONTRIBUTING.md for project maintenance
-- Enhanced .gitignore for Jupyter notebooks and Python artifacts
-- Comprehensive cabal metadata with proper bounds and documentation
+- Retrospective documentation for kernel integration bug fix (076a1bf, d892702)
 
-## [0.1.0] - 2025-10-26
+### Fixed
 
-First production-ready release with complete kernel functionality.
+- Test compilation errors in protocol bridge and runtime modules (5b25d3f, 9d3512f)
+- Resource limit test reliability and correctness (9ea0516, e2a1e3e)
 
-### Phase 4: Installation & CLI Infrastructure (October 25-26, 2025)
+## [0.3.0] - 2025-11-04
 
-#### Phase 4 Features
+### Added
 
-- CLI command infrastructure with optparse-applicative
-- Installation command with Jupyter kernelspec registration
-- Doctor command for diagnostics and troubleshooting
-- Configuration management system
-- System detection utilities (Jupyter, Python, GHC)
-- Kernelspec directory discovery and validation
-- kernel.json generation with resource limits
-- Comprehensive CLI unit and integration tests
-- TMVar-based cancellation support for CLI operations
-- Structured logging via telemetry patterns
+- Specification, plan, and tasks for Jupyter kernel bug fix (076a1bf)
+- Initial Jupyter kernel bug fix implementation (8c6963b)
 
-#### Phase 4 Documentation
+## [0.2.0] - 2025-10-26
 
-- CLI architecture documentation
-- Usage guides and troubleshooting
-- Installation & CLI specification
+### Added
 
-### Phase 3: GHC Evaluation (October 25, 2025)
+- **Phase 4: Installation & CLI Infrastructure** - Complete implementation
+  - CLI command infrastructure with `optparse-applicative` (942a212, 2f4d057)
+  - Jupyter environment detection (a7d6b9f)
+  - Kernelspec directory discovery and validation (68c4d8f)
+  - `kernel.json` generation with constitutional compliance (68c4d8f)
+  - System detection and configuration management (e5a4814)
+  - CLI data models and error types (ad19681)
+  - Constitutional audit integration (23462f8)
+  - Doctor and install command implementations
 
-#### Phase 3 Features
+### Changed
 
-- Real Haskell evaluation using hint library (GHC API)
-- Persistent GHC sessions with InterpreterT monad
-- Variable and function binding persistence across cells
-- Module import system with security policies
-- Safe module whitelist (Prelude, Data.*, Control.*, etc.)
-- Import policy enforcement (allow/deny/default)
-- Comprehensive error handling with 5 syntax error types:
-  - Parse errors with line/column information
-  - Type errors with context
-  - Runtime exceptions
-  - Timeout errors
-  - Import policy violations
-- Smart error diagnostics with actionable suggestions
-- Performance monitoring with differentiated timeouts:
-  - 3s for simple expressions
-  - 5s for declarations
-  - 30s for module imports
-- Memory monitoring via RTSStats integration
-- TMVar-based cancellation infrastructure
-- ResourceGuard integration with violation handling
-- Performance telemetry collection
+- Auto-detect `hs-jupyter-kernel` binary in install-kernelspec script (a954cd4, b5c6c03)
+- Use explicit `--name hsjupyter` for consistent kernelspec naming (b5c6c03)
 
-#### Phase 3 Testing
+### Fixed
 
-- 135+ unit test examples for GHC functionality
-- 33+ integration tests for notebook workflows
-- Comprehensive test coverage for all evaluation paths
+- CLI/GHC diagnostics and resource guard improvements (34c1227)
+- Import handling cleanups (34c1227)
 
-### Phase 2: Runtime Core (October 24, 2025)
+## [0.1.0] - 2025-10-25
 
-#### Phase 2 Features
+### Added
 
-- STM-based job queue with bounded capacity
-- Concurrent runtime manager with worker threads
-- Session state management across cell executions
-- Execution count tracking
-- Binding persistence (variables, functions)
-- Module artifact caching
-- Import list management
-- Resource management infrastructure:
-  - Memory limits (RSS and virtual memory)
-  - CPU timeouts (wall clock and user time)
-  - Output size limits with truncation
-- ResourceGuard with background monitoring
-- Job registry with TMVar cancellation tokens
-- Execution diagnostics and error reporting
-- Runtime telemetry and metrics collection
-- Comprehensive unit tests for all runtime components
-- Integration tests for execute cycle
+- **Phase 3: GHC Evaluation** - Complete implementation (145cf4a)
+  - Basic expression evaluation via hint library (ca8854b)
+  - Persistent GHC session across evaluations (ca8854b)
+  - Module import system with security policy (75af371)
+  - Error handling and diagnostics (d2699f1)
+  - Resource management and performance optimization (7d9d87d)
+  - Build optimizations for development workflow (ca8854b)
+- Constitution v1.2.0 compliance improvements (966f037)
+  - Resilience and pragmatic balance principles (c3bcfdb, a865bab)
+- Kernel testing infrastructure scripts (f22df3c)
 
-### Phase 1: Protocol Bridge (October 24, 2025)
+### Changed
 
-#### Phase 1 Features
+- Updated roadmap to reflect Phase 3 completion (950de20)
+- Made README immediately usable with quickstart, CLI, demo, troubleshooting (0127606)
 
-- Complete Jupyter kernel protocol implementation
-- ZeroMQ socket management for all 5 channels:
-  - Shell (ROUTER) - execution requests
-  - IOPub (PUB) - output broadcasting
-  - Control (ROUTER) - interrupt/shutdown
-  - Stdin (ROUTER) - input requests
-  - Heartbeat (REP) - health checks
-- HMAC-SHA256 signature validation
-- Protocol envelope parsing and serialization
-- Message codec for Jupyter wire format
-- Typed message structures (execute_request, execute_reply, etc.)
-- kernel_info_request/reply handling
-- execute_request/reply handling
-- interrupt_request/reply handling
-- Heartbeat thread with automatic echo
-- Structured logging with correlation IDs
-- Connection file parsing
-- Echo runtime for protocol validation
-- Python demo client for testing
+## [0.0.2] - 2025-10-24
 
-#### Phase 1 Infrastructure
+### Added
 
-- Initial project structure and cabal configuration
-- Test infrastructure (hspec, QuickCheck)
-- CI-ready build system
-- Documentation framework (specs/, docs/)
-- Development scripts and tooling
+- **Phase 2: Runtime Core** - Complete implementation (4b0f849)
+  - Runtime manager and session state (be6ff23)
+  - Evaluation engine (e62cfdc)
+  - Integration tests and test infrastructure (43ff2d2)
+  - Diagnostics and resource guards (8a435c2)
+  - Comprehensive documentation (e45c720)
+  - All 25/25 tasks delivered (69601bd)
+- Strengthened resource guard metrics and RTS stats (6872d0f, 465f23b)
 
-### Constitutional Compliance
+### Changed
 
-#### Constitutional Principles Implementation
-
-- Constitution v1.2.0 with four core principles:
-  1. Simplicity and Clarity (DRY, KISS, YAGNI)
-  2. Strong Design Foundation (SOLID, SoC, Composition)
-  3. Resilience and Maintainability (Defensive Programming, Law of Demeter)
-  4. Balance and Pragmatism (Rule of Three, Cohesion/Coupling)
-- Comprehensive compliance implementation across codebase
-- Shared error handling patterns (DRY)
-- Modular architecture with clear boundaries (SOLID)
-- 147+ test examples with comprehensive validation
-- Documentation-first development process
-
-### Project Documentation
-
-- Architecture overview and design decisions
-- Roadmap with phase tracking
-- Developer guide with build performance tips
-- Jupyter kernel implementation guide
-- Protocol specifications and contracts
-- Testing requirements and guidelines
-- API documentation with Haddock comments
-
-### Project Dependencies
-
-- GHC 9.6.7+
-- hint >= 0.9.0 (GHC API integration)
-- zeromq4-haskell >= 0.8 (Jupyter protocol)
-- aeson >= 2.0 (JSON handling)
-- katip (structured logging)
-- stm >= 2.5 (concurrency primitives)
-- cryptonite >= 0.30 (HMAC signatures)
-- optparse-applicative >= 0.16 (CLI parsing)
+- Updated protocol bridge telemetry and templates (d0435d0)
 
 ## [0.0.1] - 2025-10-24
 
-### Initial Release
+### Added
 
-- Initial project scaffold from Specify template
-- Basic project structure and build system
-- License (MIT) and initial documentation
+- **Phase 1: Protocol Bridge** - Initial implementation
+  - ZeroMQ-enabled kernel prototype (31939e2)
+  - Protocol demo and specifications (2a7b2ec)
+  - Kernel loops with bind guards and heartbeat checks (8118328)
+  - Runtime dependencies and tooling (f12ff46)
+  - Runtime foundational scaffolding (3edca05)
+- Initial project structure from Specify template (060d743)
 
-[Unreleased]: https://github.com/jjunho/HsJupyter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/jjunho/HsJupyter/releases/tag/v0.1.0
+### Supported
+
+- Jupyter protocol 5.3
+- GHC 9.6.7+ (via ghcup)
+- Platforms: Linux, macOS
+- Python 3.8+ for Jupyter integration
+- Test coverage: 248 unit tests, 60 integration tests
+
+[Unreleased]: https://github.com/jjunho/HsJupyter/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jjunho/HsJupyter/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/jjunho/HsJupyter/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/jjunho/HsJupyter/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/jjunho/HsJupyter/compare/v0.0.2...v0.1.0
+[0.0.2]: https://github.com/jjunho/HsJupyter/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/jjunho/HsJupyter/releases/tag/v0.0.1

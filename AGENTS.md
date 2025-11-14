@@ -10,9 +10,10 @@ Use a GHC toolchain installed via `ghcup` (`ghcup install ghc 9.12.2 cabal`) bef
 
 **⚡ Performance Note**: Full builds take several minutes due to the hint library (GHC API). For faster development:
 
-- `cabal build lib:hs-jupyter-kernel -O0` (5 seconds vs minutes)
+- `cabal build lib:hs-jupyter-kernel -O0` (5-10 seconds)
 - `cabal test unit -O0 --test-option="--match=/ModuleName/"` (targeted tests)
-- Configure `jobs: 4` and `documentation: False` in cabal.project for parallel builds
+- Configure `jobs: 4`, `documentation: False`, and `ld.gold` linker in cabal.project
+- With `ld.gold`: incremental rebuilds take 2-3 seconds (33x faster than default linker)
 
 Build emerging packages with `cabal v2-build` or `cabal v2-repl` and record any extra flags in your PR. Run documentation checks locally—`markdownlint docs/**/*.md README.md`—to keep the published guides consistent. Prototype scripts (e.g., ZeroMQ harnesses) should live under `.specify/scripts/` with executable bits set (`chmod +x .specify/scripts/dev-kernel.sh`) and usage documented.
 
@@ -34,6 +35,11 @@ Codex agents must follow the Specify toolkit prompts before running `/speckit` c
 
 ## Active Technologies
 
+- Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
+- filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
+- Haskell (GHC 9.12.2+) + `zeromq4-haskell`, `aeson`, `katip`, `stm` (005-fix-jupyter-kernel-bug)
+- N/A (in-memory kernel state) (005-fix-jupyter-kernel-bug)
+
 - **Haskell with GHC 9.6.7+** via ghcup
 - **Core Libraries**: hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm, cryptonite
 - **Testing**: hspec >= 2.10 for unit and integration tests
@@ -52,34 +58,5 @@ Codex agents must follow the Specify toolkit prompts before running `/speckit` c
 
 ## Recent Changes
 
-### Phase 4: Installation CLI (004-install-cli) - In Progress
-
-- Added CLI command infrastructure with Commands.hs, Types.hs
-- Implemented configuration management (Configuration.hs)
-- Added utility functions (Utilities.hs, Output.hs)
-- Started Install.hs and Doctor.hs implementation
-
-### Phase 3: GHC Evaluation (003-ghc-evaluation) - Complete
-
-- Full Haskell evaluation with hint library
-- Persistent GHC sessions with variable/function persistence
-- Module import system with security policies
-- Comprehensive error handling with 5 syntax error types
-- TMVar-based cancellation infrastructure
-- ResourceGuard integration with memory/CPU monitoring
-- Performance telemetry and metrics collection
-
-### Phase 2: Runtime Core (002-runtime-core) - Complete
-
-- STM-based job queue with cancellation support
-- Session state management across cell executions
-- Resource limits enforcement (memory, CPU, output)
-- Diagnostics and telemetry system
-- Job registry with TMVar tokens
-
-### Phase 1: Protocol Bridge (001-protocol-bridge) - Complete
-
-- ZeroMQ socket management for all 5 channels
-- HMAC-SHA256 signature validation
-- Protocol envelope parsing and codec implementation
-- Heartbeat thread for kernel health monitoring
+- 005-fix-jupyter-kernel-bug: Fixed three critical Jupyter protocol bugs: (1) LogEnv not respecting log level configuration, (2) parseEnvelopeFrames expecting wrong delimiter format, (3) replyEnvelope with undefined signature payload. Added ld.gold linker for 33x faster builds.
+- 001-protocol-bridge: Added Haskell (GHC 9.6.4 via ghcup) + `zeromq4-haskell` for sockets, `aeson` for JSON, `bytestring`/`text`, `katip` for structured logging

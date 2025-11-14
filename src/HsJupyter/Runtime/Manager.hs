@@ -67,7 +67,6 @@ import HsJupyter.Runtime.SessionState
   , ResourceBudget(..)
   )
 
-
 -- | Handle exposed to router/kernel for submitting jobs and interrupts.
 data RuntimeManager = RuntimeManager
   { rmSubmit :: ExecuteContext -> JobMetadata -> Text -> IO ExecutionOutcome

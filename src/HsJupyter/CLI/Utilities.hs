@@ -181,26 +181,6 @@ resolveJupyterDataDir = do
             home <- getHomeDirectory
             return $ home </> ".local" </> "share" </> "jupyter"
 
--- | Resolve Jupyter config directory
-resolveJupyterConfigDir :: IO FilePath
-resolveJupyterConfigDir = do
-    maybeConfigDir <- lookupEnv "JUPYTER_CONFIG_DIR"
-    case maybeConfigDir of
-        Just configDir -> return configDir
-        Nothing -> do
-            home <- getHomeDirectory
-            return $ home </> ".jupyter"
-
--- | Resolve Jupyter runtime directory
-resolveJupyterRuntimeDir :: IO FilePath
-resolveJupyterRuntimeDir = do
-    maybeRuntimeDir <- lookupEnv "JUPYTER_RUNTIME_DIR"
-    case maybeRuntimeDir of
-        Just runtimeDir -> return runtimeDir
-        Nothing -> do
-            home <- getHomeDirectory
-            return $ home </> ".local" </> "share" </> "jupyter" </> "runtime"
-
 -- | Resolve kernelspec directory for the given kernel name
 resolveKernelspecDir :: JupyterEnvironment -> T.Text -> FilePath
 resolveKernelspecDir env kernelName = 

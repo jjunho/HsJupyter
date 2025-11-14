@@ -45,14 +45,16 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.ByteString.Lazy.Char8 as L8
-import System.IO (hPutStrLn, stderr)
+import System.IO (stderr, hPutStrLn)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 
 import HsJupyter.CLI.Types
     ( CLIDiagnostic(..)
     , DiagnosticResult(..)
-    , KernelInstallation(..)
     , Issue(..)
+    , KernelInstallation(..)
+    , iDescription
+    , iDetails
     )
 
 -- | Output format specification

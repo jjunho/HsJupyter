@@ -133,51 +133,10 @@ CLI flags come from `app/KernelMain.hs`:
 - 🔄 **Phase 4: Installation CLI** - In development (install, doctor, configuration commands)
 - ⏳ **Phase 5: Advanced Features** - Planned (completions, debugging, package management)
 
-### Key Modules Implemented
-
-**Core Infrastructure:**
-
-- `HsJupyter.KernelProcess` - Process lifecycle, socket management, main event loop
-- `HsJupyter.Kernel.Types` - Shared type definitions and protocol types
-
-**Protocol Layer:**
-
-- `HsJupyter.Bridge.JupyterBridge` - ZeroMQ bridge with HMAC authentication
-- `HsJupyter.Bridge.HeartbeatThread` - Heartbeat socket handling
-- `HsJupyter.Bridge.Protocol.{Envelope,Codec}` - Message parsing and serialization
-
-**Routing:**
-
-- `HsJupyter.Router.RequestRouter` - Request dispatch and capability routing
-
-**Runtime System:**
-
-- `HsJupyter.Runtime.Manager` - Job queue and execution coordination
-- `HsJupyter.Runtime.GHCSession` - Persistent interpreter state
-- `HsJupyter.Runtime.GHCRuntime` - GHC evaluation engine with cancellation
-- `HsJupyter.Runtime.Evaluation` - High-level evaluation interface
-- `HsJupyter.Runtime.SessionState` - Binding and import persistence
-- `HsJupyter.Runtime.Diagnostics` - Error reporting and suggestions
-- `HsJupyter.Runtime.ErrorHandling` - Unified error handling patterns
-- `HsJupyter.Runtime.GHCDiagnostics` - GHC-specific error analysis
-- `HsJupyter.Runtime.ResourceGuard` - Resource limits and monitoring
-- `HsJupyter.Runtime.Telemetry` - Metrics collection and reporting
-
-**CLI Tools (In Development):**
-
-- `HsJupyter.CLI.Commands` - Command-line interface parsing
-- `HsJupyter.CLI.Types` - CLI data models
-- `HsJupyter.CLI.Install` - Kernel installation logic
-- `HsJupyter.CLI.Doctor` - Diagnostic utilities
-- `HsJupyter.CLI.Configuration` - Configuration management
-- `HsJupyter.CLI.Utilities` - CLI helper functions
-- `HsJupyter.CLI.Output` - Output formatting
-
-### Test Coverage
-
-- **147+ test examples** across unit and integration test suites
-- **Unit tests**: Protocol parsing, session state, diagnostics, resource management
-- **Integration tests**: Full execute cycle, GHC evaluation, JSON output, CLI operations
+- `HsJupyter.KernelProcess` – process lifecycle and socket management
+- `HsJupyter.Bridge.*` – ZeroMQ bridge, heartbeat, protocol envelopes/codecs
+- `HsJupyter.Router` – request routing and message dispatch
+- `HsJupyter.Runtime.*` – runtime manager, GHC session, diagnostics, telemetry
 
 ## CLI Reference
 

@@ -47,72 +47,66 @@ module HsJupyter.CLI.Install
   , uninstallKernel
   ) where
 
+import Control.Concurrent.STM (TMVar, atomically, newTMVarIO, putTMVar, readTMVar, takeTMVar)
+import Control.Exception (IOException, SomeException, catch, finally, try)
+import Control.Monad (filterM, when)
+import qualified System.Timeout
+import Data.Aeson
+  ( Object
+  , Value(..)
+  , (.=)
+  , eitherDecode
+  , encode
+  , object
+  )
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Key as K
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.ByteString.Lazy as LBS
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad (filterM, when)
-import Control.Exception (try, IOException, SomeException, catch)
-import qualified Control.Exception as E
-import qualified System.Timeout
+import Data.Time.Clock (getCurrentTime)
+import qualified Data.Vector as V
 import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
   , doesFileExist
-  , getPermissions
-  , writable
-  , readable
   , executable
-  , getHomeDirectory
   , findExecutable
-  , removeDirectoryRecursive
+  , getHomeDirectory
+  , getPermissions
   , listDirectory
+  , readable
+  , removeDirectoryRecursive
+  , writable
   )
-import System.FilePath ((</>), takeDirectory)
-import System.Environment (lookupEnv, getExecutablePath)
-import Data.Aeson
-  ( Value(..)
-  , Object
-  , (.=)
-  , object
-  , encode
-  , eitherDecode
-  )
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Aeson.Key as K
-import qualified Data.Vector as V
-import qualified Data.ByteString.Lazy as LBS
-import Data.Maybe (fromMaybe)
-import System.Process (readProcessWithExitCode)
+import System.Environment (getExecutablePath, lookupEnv)
 import System.Exit (ExitCode(..))
-import Data.Time (getCurrentTime)
-import Data.Version (showVersion)
-import qualified Paths_hs_jupyter_kernel as Paths
-
+import System.FilePath ((</>), takeDirectory)
+import System.IO (hPutStrLn, stdout)
+import System.Process (readProcessWithExitCode)
 
 -- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
 import HsJupyter.Runtime.ResourceGuard
   ( ResourceLimits(..)
-  , withResourceGuard
-  , defaultResourceLimits
   , ResourceViolation(..)
+  , defaultResourceLimits
+  , withResourceGuard
   )
-import HsJupyter.Runtime.ErrorHandling
-  ( withErrorContext
-  )
+import HsJupyter.Runtime.ErrorHandling (withErrorContext)
 
 -- T037: Command output formatting imports
-import HsJupyter.CLI.Output (formatOutput, OutputFormat(..))
-import HsJupyter.CLI.Commands (ListOptions(..), VersionOptions(..), UninstallOptions(..))
+import HsJupyter.CLI.Output (OutputFormat(..), formatOutput)
+import HsJupyter.CLI.Commands (ListOptions(..), UninstallOptions(..), VersionOptions(..))
 
 -- T020: Structured logging integration following constitutional patterns
 import HsJupyter.Runtime.Telemetry
   ( RuntimeMetric(..)
   , emitMetric
   )
-import qualified Data.Aeson as A
-import System.IO (stdout, hPutStrLn)
 
 -- T021: Cancellation support imports
-import Control.Concurrent.STM (TMVar, newTMVarIO, takeTMVar, putTMVar, readTMVar, atomically)
 
 import HsJupyter.CLI.Types
   ( InstallScope(..)
@@ -154,7 +148,7 @@ listKernelInstallations options = withErrorContext "list-kernel-installations" $
     Nothing -> do
       result <- findKernelspecDirectories
       case result of
-        Left _diag -> return []
+        Left _ -> return []
         Right dirs -> return dirs
 
   -- Scan for HsJupyter installations in each directory
@@ -696,9 +690,6 @@ withCLIResourceError operation action = do
 withCLIResourceCleanup :: IO () -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
 withCLIResourceCleanup cleanup action =
   action `finally` cleanup
-  where
-    finally :: IO a -> IO b -> IO a
-    finally = E.finally
 
 -- | CLI-specific timeout wrapper for operations
 withCLITimeout :: Int -> Text -> IO (Either CLIDiagnostic a) -> IO (Either CLIDiagnostic a)
@@ -773,11 +764,11 @@ cancelOperation token = do
   logCLIOperation "cancellation" "Operation cancellation requested" [("component", A.String "cancellation")]
   -- Set cancellation flag if not already set
   atomically $ do
-    _cancelled <- takeTMVar (ctCancelled token)
+    _ <- takeTMVar (ctCancelled token)
     putTMVar (ctCancelled token) True
   -- Execute cleanup actions in reverse order (LIFO)
   cleanupActions <- atomically $ readTMVar (ctCleanupActions token)
-  mapM_ (\action -> action `Control.Exception.catch` \(_ :: SomeException) -> return ()) (reverse cleanupActions)
+  mapM_ (\action -> action `catch` \(_ :: SomeException) -> return ()) (reverse cleanupActions)
   logCLIOperation "cancellation" "Cleanup actions completed" [("actions_count", A.Number $ fromIntegral $ length cleanupActions)]
 
 -- | Check if operation has been cancelled
@@ -799,7 +790,7 @@ withCancellation token operation = do
     then return $ Left $ SystemIntegrationError "Operation cancelled before start"
     else do
       -- Execute operation and handle cancellation
-      result <- (Right <$> operation) `Control.Exception.catch` \(_ :: SomeException) -> do
+      result <- (Right <$> operation) `catch` \(_ :: SomeException) -> do
         -- Check if cancellation was the cause
         cancelled' <- isCancelled token
         if cancelled'
@@ -840,8 +831,8 @@ executeInstall options = withErrorContext "kernel-installation" $ do
         , rcMaxMemoryMB = 100      -- 100MB memory limit per specification
         , rcMaxOutputBytes = 10485760  -- 10MB output limit for logs
         }
-
-  result <- withResourceGuard installationLimits $ \_guard -> do
+  
+  result <- withResourceGuard installationLimits $ \_ -> do
     -- Step 1: Detect Jupyter environment (T015 implementation)
     logInstallStep "detect-environment" "Detecting Jupyter environment" []
     jupyterEnvResult <- withCLIResourceError "jupyter-environment-detection" detectJupyterEnvironment
@@ -894,8 +885,8 @@ detectJupyterEnvironment = withErrorContext "jupyter-environment-detection" $ do
         , rcMaxMemoryMB = 25       -- 25MB memory limit for detection operations
         , rcMaxOutputBytes = 524288  -- 512KB output limit for command outputs
         }
-
-  withResourceGuard detectionLimits $ \_guard -> do
+  
+  withResourceGuard detectionLimits $ \_ -> do
     -- Use the Utilities module function for core detection
     result <- withCLIResourceError "core-jupyter-detection" Utilities.detectJupyterEnvironment
     case result of
@@ -1351,8 +1342,8 @@ executeKernelRegistration options jupyterEnv = withErrorContext "kernel-registra
         , rcMaxMemoryMB = 50       -- 50MB memory limit for file operations
         , rcMaxOutputBytes = 1048576  -- 1MB output limit for logs
         }
-
-  withResourceGuard registrationLimits $ \_guard -> do
+  
+  withResourceGuard registrationLimits $ \_ -> do
     -- Step 1: Find suitable kernelspec directory for installation  
     targetDirectoryResult <- withCLIResourceError "directory-selection" $
       selectInstallationDirectory options jupyterEnv
@@ -1439,9 +1430,7 @@ findBestInstallationDirectory dirs = do
     [] -> do
       -- Fall back to system directories if no user directories available
       systemDirs <- filterSystemDirectories dirs
-      return $ case systemDirs of
-        (dir:_) -> Just dir
-        [] -> Nothing
+      return $ listToMaybe systemDirs
 
 -- | Resolve kernel name, handling conflicts with existing installations (T018)
 resolveKernelName :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Text)
@@ -1733,5 +1722,5 @@ validateEnvironmentConfiguration kernelJson = do
     _ -> return $ Left $ ValidationError "kernel.json must be a JSON object"
   where
     isFieldMissing :: Object -> Text -> IO Bool
-    isFieldMissing obj fieldName =
+    isFieldMissing obj fieldName = 
       return $ not $ KM.member (K.fromText fieldName) obj

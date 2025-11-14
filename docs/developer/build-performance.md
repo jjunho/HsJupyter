@@ -15,9 +15,18 @@ HsJupyter builds can be slow due to the **hint library** (GHC API integration). 
 
 ### Typical Build Times
 
+**With optimizations (default ld linker):**
+
 - **Full build with optimization**: 3-5 minutes
-- **Library-only build (`-O0`)**: 5-15 seconds
 - **Incremental builds**: 30 seconds - 2 minutes
+
+**With ld.gold linker (recommended):**
+
+- **Full build (`-O0`)**: ~18 seconds
+- **Incremental builds**: 2-3 seconds (33x faster!)
+- **Library-only build**: 5-10 seconds
+
+**Note**: Using `ld.gold` provides dramatic linking speedup. See configuration below.
 
 ## Fast Development Workflow
 
@@ -56,6 +65,33 @@ cabal build  # With optimizations
 ```
 
 ## Build Configuration
+
+### Linker Optimization (Highly Recommended)
+
+Using `ld.gold` provides **33x faster** incremental builds compared to the default linker.
+
+Add to `cabal.project`:
+
+```cabal
+-- Use faster linker (gold is significantly faster than default ld)
+program-options
+  ghc-options: -optl-fuse-ld=gold
+```
+
+**Performance comparison:**
+
+- Default `ld` linker: 77 seconds for incremental rebuild
+- `ld.gold` linker: 2.3 seconds for incremental rebuild
+
+**Installation** (if not already present):
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install binutils-gold
+
+# Verify availability
+which ld.gold
+```
 
 ### Project-Level Optimizations
 

@@ -54,10 +54,6 @@ __pycache__/
 .pytest_cache/
 .cache/
 
-# Jupyter notebook checkpoints
-.ipynb_checkpoints/
-*.ipynb_checkpoints/
-
 # Test artifacts
 coverage/
 .coverage
@@ -79,3 +75,8 @@ secrets/
 # Debug/dump files
 all.txt
 docs.txt
+
+.local/
+.ipynb_checkpoints/
+
+.claude/commands

@@ -99,7 +99,7 @@ enrichDiagnostic diag suggestions = diag
 -- | Propagate errors through the diagnostic system.
 -- Standard error propagation pattern.
 propagateError :: GHCError -> RuntimeDiagnostic
-propagateError (CompilationError msg _loc _suggestions) = mkDiagnostic SeverityError msg
+propagateError (CompilationError msg _ _) = mkDiagnostic SeverityError msg
 propagateError (TimeoutError seconds) = mkError $ "Operation timed out after " <> T.pack (show seconds) <> " seconds"
 propagateError (ImportError modName msg) = mkError $ "Import failed for " <> T.pack modName <> ": " <> msg
 propagateError (RuntimeError msg) = mkError $ "Runtime error: " <> msg

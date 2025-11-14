@@ -61,15 +61,8 @@ import HsJupyter.CLI.Types
   , KernelInstallation(..)
   , JupyterVersion(..)
   )
-import HsJupyter.CLI.Commands (GlobalOptions(..), ListOptions(..))
-import HsJupyter.CLI.Install
-  ( detectJupyterEnvironment
-  , logCLIOperation
-  , listKernelInstallations
-  )
-import System.Directory (findExecutable)
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
+import HsJupyter.CLI.Commands (GlobalOptions(..))
+import HsJupyter.CLI.Install (detectJupyterEnvironment, logCLIOperation)
 
 -- ===========================================================================
 -- T025: DiagnosticResult Data Model and Analysis Logic
@@ -198,7 +191,7 @@ executeDiagnostics globalOpts = withErrorContext "system-diagnostics" $ do
         , rcMaxOutputBytes = 1048576 -- 1MB output limit for diagnostic reports
         }
   
-  result <- withResourceGuard diagnosticsLimits $ \_guard -> do
+  result <- withResourceGuard diagnosticsLimits $ \_ -> do
     analysisResult <- performSystemHealthCheck StandardAnalysis
     case analysisResult of
       Left diag -> return $ Left diag
@@ -380,10 +373,17 @@ checkJupyterComponent _depth checkTime = do
 -- | Check HsJupyter kernel component health
 checkKernelComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
 checkKernelComponent _depth checkTime = do
-  -- List all kernel installations using the exported function
-  let listOpts = ListOptions
-        { loShowAll = True  -- Include all installations for comprehensive diagnostics
-        , loSearchPath = Nothing  -- Search all standard directories
+  -- TODO: Implement kernel detection logic
+  -- For now, return placeholder status
+  let status = ComponentStatus
+        { csComponent = KernelComponent
+        , csHealth = NotFoundComponent  -- Will be updated with actual detection
+        , csVersion = Nothing
+        , csPath = Nothing
+        , csAccessible = False
+        , csFunctional = False
+        , csIssues = []
+        , csLastCheck = checkTime
         }
   installationsResult <- listKernelInstallations listOpts
   case installationsResult of

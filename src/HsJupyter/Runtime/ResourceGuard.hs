@@ -204,9 +204,9 @@ monitorMemoryUsage action = do
           usedBytes = max 0 (endBytes - startBytes)
           bytesPerMb :: Double
           bytesPerMb = 1024 * 1024
-          rawMb :: Integer
+          rawMb :: Int
           rawMb = ceiling (fromIntegral usedBytes / bytesPerMb)
-          usedMB = if rawMb <= 0 then 1 else fromIntegral rawMb
+          usedMB = if rawMb <= 0 then 1 else rawMb
 
       pure $ case result of
         Left ex    -> Left ex

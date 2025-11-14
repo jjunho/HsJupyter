@@ -13,6 +13,7 @@ import HsJupyter.Bridge.Protocol.Envelope
   ( MessageHeader(..)
   , ProtocolEnvelope(..)
   , emptyMetadata
+  , signaturePayloadFrom
   )
 
 spec :: Spec
@@ -20,7 +21,7 @@ spec = describe "Signature validation" $ do
   it "accepts envelopes with matching signature" $ do
     key <- pure (BS.pack "secret")
     env <- makeEnvelope
-    let signature = computeSignature key env
+    let signature = computeSignature key (envelopeSignaturePayload env)
         signed = env { envelopeSignature = signature }
     verifySignature key signed `shouldBe` True
 
@@ -41,11 +42,14 @@ makeEnvelope = do
         , version = T.pack "5.3"
         , date = Just now
         }
+      payload = Aeson.object ["code" Aeson..= T.pack "print(1)"]
+      sigPayload = signaturePayloadFrom header Nothing emptyMetadata payload
   pure ProtocolEnvelope
-    { envelopeIdentities = [T.pack "id"]
+    { envelopeIdentities = [BS.pack "id"]
     , envelopeHeader = header
     , envelopeParent = Nothing
     , envelopeMetadata = emptyMetadata
-    , envelopeContent = Aeson.object ["code" Aeson..= T.pack "print(1)"]
+    , envelopeContent = payload
     , envelopeSignature = T.empty
+    , envelopeSignaturePayload = sigPayload
     }
