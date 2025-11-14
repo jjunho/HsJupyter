@@ -35,19 +35,15 @@ Codex agents must follow the Specify toolkit prompts before running `/speckit` c
 
 ## Active Technologies
 
-- Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
-- filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
-- Haskell (GHC 9.12.2+) + `zeromq4-haskell`, `aeson`, `katip`, `stm` (005-fix-jupyter-kernel-bug)
-- N/A (in-memory kernel state) (005-fix-jupyter-kernel-bug)
-
-- **Haskell with GHC 9.6.7+** via ghcup
-- **Core Libraries**: hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm, cryptonite
+- **Haskell with GHC 9.6.7+** (9.12.2+ recommended) via ghcup
+- **Core Libraries**: hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm, cryptonite, optparse-applicative
 - **Testing**: hspec >= 2.10 for unit and integration tests
 - **Concurrency**: STM for job queues and cancellation tokens
 - **Logging**: katip for structured observability
-- **Persistence**: In-memory interpreter state via hint InterpreterT monad
+- **Persistence**: In-memory interpreter state via hint InterpreterT monad + filesystem-based kernelspec directories
 - **Protocol**: ZeroMQ sockets with HMAC-SHA256 authentication
-- **Build System**: Cabal 3.0+ with optimized build flags
+- **Build System**: Cabal 3.0+ with optimized build flags (ld.gold linker for 33x faster builds)
+- **CLI**: optparse-applicative for command parsing, directory/filepath for system integration
 
 ### Phase-Specific Technologies
 
