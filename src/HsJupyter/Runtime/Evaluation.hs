@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
 import HsJupyter.Runtime.Diagnostics (mkInfo)
-import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, ghcConfigFromBudget)
+import HsJupyter.Runtime.GHCRuntime (evaluateExpression, evaluateDeclaration, ghcConfigFromBudget, importModule)
 import HsJupyter.Runtime.GHCSession (newGHCSession, cleanupSession, GHCSessionState)
 import HsJupyter.Runtime.GHCDiagnostics (ghcErrorToDiagnostic)
 import System.IO.Unsafe (unsafePerformIO)
@@ -156,7 +156,7 @@ runEchoEvaluation newState executionCount job = do
       outcome = ExecutionOutcome
         { outcomeStatus = ExecutionOk
         , outcomeStreams = [stream]
-        , outcomePayload = [String truncated]  -- Use truncated value in payload
+        , outcomePayload = [payload]
         , outcomeDiagnostics = [mkInfo "Echo evaluation (legacy mode)"]
         , outcomeExecutionCount = executionCount
         , outcomeDuration = 0  -- Will be set by caller

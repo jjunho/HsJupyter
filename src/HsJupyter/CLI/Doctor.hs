@@ -65,7 +65,7 @@ import HsJupyter.CLI.Types
   , JupyterVersion(..)
   )
 import HsJupyter.CLI.Commands (GlobalOptions(..))
-import HsJupyter.CLI.Install (detectJupyterEnvironment, logCLIOperation)
+import HsJupyter.CLI.Install (detectJupyterEnvironment, logCLIOperation, listKernelInstallations)
 
 -- ===========================================================================
 -- T025: DiagnosticResult Data Model and Analysis Logic
@@ -388,61 +388,9 @@ checkKernelComponent _depth checkTime = do
         , csIssues = []
         , csLastCheck = checkTime
         }
-  installationsResult <- listKernelInstallations listOpts
-  case installationsResult of
-    Left _diag -> do
-      -- Cannot find kernelspec directories or other error
-      let status = ComponentStatus
-            { csComponent = KernelComponent
-            , csHealth = NotFoundComponent
-            , csVersion = Nothing
-            , csPath = Nothing
-            , csAccessible = False
-            , csFunctional = False
-            , csIssues = [Issue Major KernelComponent "Unable to locate kernelspec directories" Nothing]
-            , csLastCheck = checkTime
-            }
-      return $ Right status
-    Right installations -> do
-      case installations of
-        [] -> do
-          -- No HsJupyter kernel installed
-          let status = ComponentStatus
-                { csComponent = KernelComponent
-                , csHealth = NotFoundComponent
-                , csVersion = Nothing
-                , csPath = Nothing
-                , csAccessible = True  -- Dirs exist but kernel not installed
-                , csFunctional = False
-                , csIssues = [Issue Minor KernelComponent "HsJupyter kernel not installed" Nothing]
-                , csLastCheck = checkTime
-                }
-          return $ Right status
-        (kernel:_) -> do
-          -- At least one installation found - analyze its health
-          let issues = analyzeKernelInstallation kernel
-              health = if null issues then HealthyComponent else HealthyWithWarningsComponent
-              functional = case kiStatus kernel of
-                Installed -> True
-                InstalledWithIssues _ -> True
-                _ -> False
-          let status = ComponentStatus
-                { csComponent = KernelComponent
-                , csHealth = health
-                , csVersion = Just (kiVersion kernel)
-                , csPath = Just (kiKernelspecPath kernel)
-                , csAccessible = True
-                , csFunctional = functional
-                , csIssues = issues
-                , csLastCheck = checkTime
-                }
-          return $ Right status
-  where
-    analyzeKernelInstallation kernel = case kiStatus kernel of
-      Installed -> []
-      InstalledWithIssues kerIssues -> kerIssues
-      NotInstalled -> [Issue Critical KernelComponent "Kernel not properly installed" Nothing]
-      Corrupted kerIssues -> Issue Critical KernelComponent "Kernel installation corrupted" Nothing : kerIssues
+  -- TODO: Implement kernel installation detection
+  -- installationsResult <- listKernelInstallations listOpts
+  return $ Right status
 
 -- | Check GHC component health
 checkGHCComponent :: AnalysisDepth -> UTCTime -> IO (Either CLIDiagnostic ComponentStatus)
