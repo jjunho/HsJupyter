@@ -21,8 +21,6 @@ module HsJupyter.CLI.Utilities
     
       -- * Path Resolution
     , resolveJupyterDataDir
-    , resolveJupyterConfigDir
-    , resolveJupyterRuntimeDir
     , resolveKernelspecDir
     , ensureDirectoryExists
     

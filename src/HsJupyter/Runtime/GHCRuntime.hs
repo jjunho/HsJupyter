@@ -68,9 +68,10 @@ module HsJupyter.Runtime.GHCRuntime
 import Control.Concurrent.STM
 -- TMVar import removed: not needed here
 import Control.Exception (catch, evaluate)
+import Control.Monad.IO.Class (liftIO)
 import Data.Char (isDigit, isSpace)
 import Data.Int (Int64)
-import Data.List (isInfixOf, isPrefixOf, nub)
+import Data.List (isInfixOf, isPrefixOf, nub, foldl')
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime, getCurrentTime, diffUTCTime, UTCTime)
@@ -82,7 +83,7 @@ import HsJupyter.Runtime.GHCSession (GHCSessionState(..), GHCConfig(..), ImportP
 import HsJupyter.Runtime.GHCDiagnostics (GHCError(..), SourceLocation(..), interpretError)
 import HsJupyter.Runtime.Diagnostics (RuntimeDiagnostic)
 import HsJupyter.Runtime.SessionState (ResourceBudget(..))
-import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..))
+import HsJupyter.Runtime.ResourceGuard (ResourceLimits(..), ResourceViolation(..), withResourceGuard, CpuLimitMode(..), MemoryLimitMode(..), truncateOutput)
 
 -- | Input structure for GHC evaluation operations
 data GHCEvaluationRequest = GHCEvaluationRequest
@@ -384,7 +385,7 @@ evaluateExpressionCancellable session code token = do
               let activeImports = nub ("Prelude" : baseImports)
               setImports activeImports
               recordedDecls <- liftIO $ atomically $ listDeclarations session
-              mapM_ (runStmt . T.unpack) recordedDecls
+              mapM_ runStmt recordedDecls
               -- Wrap expression with 'show' to get String representation
               let wrappedCode = "show (" ++ T.unpack code ++ ")"
               interpret wrappedCode (as :: String)
@@ -460,7 +461,7 @@ evaluateDeclarationCancellable session code token = do
           let activeImports = nub ("Prelude" : baseImports)
           setImports activeImports
           recordedDecls <- liftIO $ atomically $ listDeclarations session
-          mapM_ (runStmt . T.unpack) recordedDecls
+          mapM_ runStmt recordedDecls
           -- Execute the declaration using runStmt (for let bindings, function definitions)
           runStmt (T.unpack code)
         return $ case interpreterResult of

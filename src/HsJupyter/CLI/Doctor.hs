@@ -34,6 +34,9 @@ import qualified Data.Text as T
 import Data.Aeson (ToJSON(..), (.=), object)
 import qualified Data.Aeson as A
 import Data.Time.Clock (getCurrentTime, UTCTime)
+import System.Exit (ExitCode(..))
+import System.Process (readProcessWithExitCode)
+import System.Directory (findExecutable)
 
 -- Constitutional integration
 import HsJupyter.Runtime.ErrorHandling (withErrorContext)

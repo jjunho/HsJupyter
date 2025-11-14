@@ -132,10 +132,6 @@ listImportedModules session = readTVar (importedModules session)
 recordDeclaration :: GHCSessionState -> Text -> STM ()
 recordDeclaration session decl = modifyTVar' (sessionDeclarations session) (++ [decl])
 
--- | Retrieve the list of previously recorded declarations
-listDeclarations :: GHCSessionState -> STM [Text]
-listDeclarations session = readTVar (sessionDeclarations session)
-
 -- | Execute action with managed GHC session
 withGHCSession :: GHCConfig -> (GHCSessionState -> STM a) -> STM (Either String a)
 withGHCSession config action = do

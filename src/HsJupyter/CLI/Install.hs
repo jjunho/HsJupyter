@@ -86,6 +86,8 @@ import System.Exit (ExitCode(..))
 import System.FilePath ((</>), takeDirectory)
 import System.IO (hPutStrLn, stdout)
 import System.Process (readProcessWithExitCode)
+import Data.Version (showVersion)
+import qualified Paths_hs_jupyter_kernel as Paths
 
 -- T019: ResourceGuard and ErrorHandling integration for constitutional compliance
 import HsJupyter.Runtime.ResourceGuard
