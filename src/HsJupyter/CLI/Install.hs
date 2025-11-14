@@ -179,7 +179,7 @@ scanDirectoriesForInstallations dirs = do
 -- | Scan single directory for kernel installations
 scanDirectoryForInstallations :: FilePath -> IO [KernelInstallation]
 scanDirectoryForInstallations kernelspecDir = do
-  logCLIOperation "scan" ("Scanning directory: " ++ kernelspecDir) []
+  logCLIOperation "scan" ("Scanning directory: " <> kernelspecDir) []
 
   -- Check if directory exists
   exists <- doesDirectoryExist kernelspecDir
@@ -458,8 +458,8 @@ uninstallKernel options = withErrorContext "uninstall-kernel" $ do
             Right cleanupActions -> do
               let totalSuccesses = length successes
                   totalErrors = length errors
-                  summaryMsg = T.pack $ "Uninstalled " ++ show totalSuccesses ++ " kernel(s)"
-                  finalResult = UninstallResult (successes ++ cleanupActions) summaryMsg
+                  summaryMsg = T.pack $ "Uninstalled " <> show totalSuccesses <> " kernel(s)"
+                  finalResult = UninstallResult (successes <> cleanupActions) summaryMsg
 
               logCLIOperation "uninstall" "Kernel uninstallation completed"
                 [("total_uninstalled", A.Number $ fromIntegral totalSuccesses)
@@ -483,7 +483,7 @@ uninstallSingleInstallation options installation = do
       kernelName = extractKernelNameFromPath kernelspecPath
       installationDir = takeDirectory kernelspecPath
 
-  logCLIOperation "uninstall-single" ("Uninstalling: " ++ kernelName)
+  logCLIOperation "uninstall-single" ("Uninstalling: " <> kernelName)
     [("kernelspec_path", A.String $ T.pack kernelspecPath)]
 
   -- Check if we should force removal even if there are issues
@@ -521,12 +521,13 @@ isRemovableInstallation installation =
     NotInstalled -> False  -- Not installed installations should not be removable
 
 -- | Extract kernel name from kernelspec path
+-- Optimized: single pass with reverse instead of length + !!
 extractKernelNameFromPath :: FilePath -> String
 extractKernelNameFromPath kernelspecPath =
   let pathComponents = splitDirectories kernelspecPath
-  in if length pathComponents >= 2
-     then pathComponents !! (length pathComponents - 2)  -- Parent directory of kernel.json
-     else "unknown-kernel"
+  in case reverse pathComponents of
+     (_:parent:_) -> parent  -- Parent directory of kernel.json
+     _ -> "unknown-kernel"
 
 -- | Split path into directory components
 splitDirectories :: FilePath -> [String]
@@ -727,11 +728,11 @@ logCLIOperation operation details fields = do
             [ "operation" A..= operation
             , "details" A..= details
             , "timestamp" A..= timestamp
-            ] ++ [(K.fromString k, v) | (k, v) <- fields]
+            ] <> [(K.fromString k, v) | (k, v) <- fields]
         , metricLabels = [("component", "cli")]
         }
   emitMetric (const $ return ()) metric  -- Simple emit to stdout for now
-  hPutStrLn stdout $ "[CLI] " ++ operation ++ ": " ++ details
+  hPutStrLn stdout $ "[CLI] " <> operation <> ": " <> details
 
 -- | Log installation step with structured context
 logInstallStep :: String -> String -> [(String, A.Value)] -> IO ()
@@ -1075,7 +1076,7 @@ findKernelspecDirectories = do
   customDirs <- findCustomJupyterDirs
 
   -- Combine all potential directories
-  let allDirs = standardDirs ++ condaEnvDirs ++ customDirs
+  let allDirs = standardDirs <> condaEnvDirs <> customDirs
 
   -- Filter to only existing and accessible directories
   validDirs <- filterAccessibleDirectories allDirs
@@ -1109,7 +1110,7 @@ findCondaKernelspecDirs = do
         , homeDir </> "anaconda3" </> "share" </> "jupyter" </> "kernels"
         ]
 
-  return $ condaDirs ++ homeConda
+  return $ condaDirs <> homeConda
 
 -- | Find custom Jupyter directories from JUPYTER_PATH environment variable (T016)
 findCustomJupyterDirs :: IO [FilePath]
@@ -1120,7 +1121,8 @@ findCustomJupyterDirs = do
     Just paths -> do
       -- Split by colon on Unix systems (TODO: Handle Windows semicolon)
       let pathList = T.split (== ':') (T.pack paths)
-      return $ map (</> "kernels") $ map T.unpack pathList
+      -- Optimized: fuse two maps into single map
+      return $ map ((</> "kernels") . T.unpack) pathList
 
 -- | Ensure directory exists, creating it if necessary (T016)
 ensureDirectoryExists :: FilePath -> IO (Either CLIDiagnostic FilePath)
@@ -1191,7 +1193,7 @@ generateKernelJson options ghcPath = do
                 , "interrupt_mode" .= ("signal" :: Text)
                 , "env" .= generateEnvironmentVariablesWithCustom options ghcPath
                 , "metadata" .= generateKernelMetadataWithCustom options
-                ] ++ generateResourceLimitFields options
+                ] <> generateResourceLimitFields options
           return $ Right kernelJson
 
 -- | Generate argv array for kernel startup command (T017 + T033: Phase 5 US3)
@@ -1211,7 +1213,7 @@ generateKernelArgvWithCustomArgs options executablePath =
       timeoutArgs = case ioConnectionTimeout options of
         Nothing -> []
         Just timeout -> ["--timeout", T.pack (show timeout)]
-  in baseArgs ++ customArgs ++ timeoutArgs
+  in baseArgs <> customArgs <> timeoutArgs
 
 -- | Get display name for the kernel from options or default (T017)
 getDisplayName :: InstallOptions -> Text
@@ -1432,12 +1434,14 @@ findBestInstallationDirectory [] = return Nothing
 findBestInstallationDirectory dirs = do
   -- Prefer user directories over system directories
   userDirs <- filterUserDirectories dirs
-  if not (null userDirs)
-    then return $ Just (head userDirs)
-    else do
+  case userDirs of
+    (dir:_) -> return $ Just dir
+    [] -> do
       -- Fall back to system directories if no user directories available
       systemDirs <- filterSystemDirectories dirs
-      return $ if null systemDirs then Nothing else Just (head systemDirs)
+      return $ case systemDirs of
+        (dir:_) -> Just dir
+        [] -> Nothing
 
 -- | Resolve kernel name, handling conflicts with existing installations (T018)
 resolveKernelName :: InstallOptions -> FilePath -> IO (Either CLIDiagnostic Text)
@@ -1505,7 +1509,7 @@ verifyKernelInstallation kernelPath = do
 -- | Enhanced kernel installation verification with validation level support (T024)
 verifyKernelInstallationWithLevel :: ValidationLevel -> FilePath -> IO (Either CLIDiagnostic ())
 verifyKernelInstallationWithLevel validationLevel kernelPath = do
-  logInstallStep "verification" ("Starting kernel verification at level: " ++ show validationLevel)
+  logInstallStep "verification" ("Starting kernel verification at level: " <> show validationLevel)
     [("kernel_path", A.String $ T.pack kernelPath)]
 
   case validationLevel of

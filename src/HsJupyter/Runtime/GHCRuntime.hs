@@ -725,12 +725,19 @@ selectTimeout session opType code =
     Import -> compilationTimeout config   -- 10 seconds for imports
 
 -- | Check if expression is simple (arithmetic, literals, basic operations)
+-- Optimized: single pass evaluation and safe list access
 isSimpleExpression :: String -> Bool
 isSimpleExpression code = 
   let trimmed = filter (not . isSpace) code
       isShort = length code < 50
+      -- Safe check for string literals without multiple traversals
+      isStringLiteral = case trimmed of
+        ('"':rest) -> case reverse rest of
+          ('"':_) -> True
+          _ -> False
+        _ -> False
       isLiteral = all isDigit trimmed || 
-                  (length trimmed >= 2 && head trimmed == '"' && last trimmed == '"') ||
+                  isStringLiteral ||
                   trimmed `elem` (["True", "False"] :: [String])
       isBasicArithmetic = all (\c -> isDigit c || c `elem` ("+-*/() " :: String)) code
   in isShort && (isLiteral || isBasicArithmetic)
@@ -753,8 +760,9 @@ isSimpleDeclaration code =
      not (any (`isInfixOf` code) ["where", "case", "if", "do", "data", "newtype", "class"])
 
 -- | Count occurrences of a character in a string
+-- Optimized: single pass with fold instead of length . filter
 countChar :: Char -> String -> Int
-countChar c = length . filter (== c)
+countChar c = foldl' (\acc x -> if x == c then acc + 1 else acc) 0
 
 -- | Default GHC configuration with differentiated timeouts
 defaultGHCConfig :: GHCConfig
