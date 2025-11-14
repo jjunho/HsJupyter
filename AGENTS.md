@@ -35,6 +35,8 @@ Codex agents must follow the Specify toolkit prompts before running `/speckit` c
 ## Active Technologies
 - Haskell with GHC 9.12.2+ via ghcup + existing HsJupyter kernel, process, filepath, directory, unix (for system integration), optparse-applicative (CLI parsing) (004-install-cli)
 - filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
+- Haskell with GHC 9.6.7+ (9.12.2+ recommended) via ghcup + `optparse-applicative` (CLI parsing), `filepath`, `directory`, `unix` (for system integration), `process` (subprocess execution), `aeson` (JSON output), existing HsJupyter kernel modules (004-install-cli)
+- Filesystem-based (Jupyter kernelspec directories, kernel.json files) (004-install-cli)
 
 - Haskell with GHC 9.12.2 via ghcup + hint >= 0.9.0 (GHC API), zeromq4-haskell, aeson, katip, stm (003-ghc-evaluation)
 - In-memory interpreter state (hint InterpreterT monad) (003-ghc-evaluation)
