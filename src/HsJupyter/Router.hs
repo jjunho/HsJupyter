@@ -10,7 +10,12 @@ import           Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Time.Clock (getCurrentTime)
+import qualified Data.UUID as UUID
+import qualified Data.UUID.V4 as UUID
+import           Data.Version (showVersion)
 import qualified Katip as K
+import qualified Language.Haskell.Interpreter as Hint
 
 import           HsJupyter.Bridge.Types (BridgeError (..))
 import           HsJupyter.Bridge.Protocol.Envelope (ExecuteReply (..),
@@ -26,6 +31,7 @@ import           HsJupyter.Bridge.Protocol.Envelope (ExecuteReply (..),
 import           HsJupyter.Runtime.Manager (RuntimeManager)
 import qualified HsJupyter.Runtime.Manager as RM
 import           HsJupyter.Runtime.SessionState
+import qualified Paths_hs_jupyter_kernel as Paths
 
 -- | Main entry point for routing messages from the shell and control channels.
 routeRequest :: (K.KatipContext m)
@@ -44,20 +50,31 @@ routeRequest manager envelope =
 
 handleKernelInfo :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
 handleKernelInfo _ envelope = do
-  -- In a real implementation, this would query the GHC version, etc.
+  -- Get GHC version - we query the interpreter to ensure it's available
+  ghcVersionResult <- Hint.runInterpreter $ do
+    Hint.set [Hint.languageExtensions Hint.:= []]
+    Hint.eval "System.Info.compilerVersion" :: Hint.Interpreter String
+
+  let ghcVer = case ghcVersionResult of
+        Left _  -> "GHC (version unknown)" -- Fallback if GHC not available
+        Right v -> "GHC " <> T.pack v
+
+  -- Get implementation version from Cabal-generated Paths module
+  let implVersion = T.pack (showVersion Paths.version)
+
   let reply = KernelInfoReply
         { languageInfo = LanguageInfo
             { liName = "haskell"
-            , liVersion = "9.2.4" -- TODO: Get from GHC API
+            , liVersion = ghcVer
             , liMimetype = "text/x-haskell"
             , liFileExtension = ".hs"
             }
         , protocolVersion = "5.3"
         , implementation = "hs-jupyter"
-        , implementationVersion = "0.1.0" -- TODO: Get from Cabal
-        , banner = "HsJupyter - A Haskell kernel for Jupyter"
+        , implementationVersion = implVersion
+        , banner = "HsJupyter - A Haskell kernel for Jupyter\n" <> ghcVer <> " | Version: " <> implVersion
         }
-  return $ replyEnvelope envelope "kernel_info_reply" (Aeson.toJSON reply)
+  replyEnvelope envelope "kernel_info_reply" (Aeson.toJSON reply)
 
 handleExecuteRequest :: (K.KatipContext m)
                      => RuntimeManager
@@ -90,44 +107,50 @@ handleExecuteRequest manager envelope =
             , erPayload = []
             , erReplyUserExpressions = Aeson.object []
             }
-      return $ Right [replyEnvelope envelope "execute_reply" (Aeson.toJSON reply)]
+      replyEnv <- liftIO $ replyEnvelope envelope "execute_reply" (Aeson.toJSON reply)
+      return $ Right [replyEnv]
 
 handleInterrupt :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
 handleInterrupt manager envelope = do
   RM.enqueueInterrupt manager (msgId (envelopeHeader envelope))
-  return $ replyEnvelope envelope "interrupt_reply" (Aeson.toJSON $ InterruptReply "ok")
+  replyEnvelope envelope "interrupt_reply" (Aeson.toJSON $ InterruptReply "ok")
 
 handleShutdown :: RuntimeManager -> ProtocolEnvelope Value -> IO (ProtocolEnvelope Value)
 handleShutdown _manager envelope =
   case Aeson.fromJSON (envelopeContent envelope) of
     Aeson.Error _ ->
       -- This shouldn't happen for a valid shutdown request
-      return $ replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply False)
+      replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply False)
     Aeson.Success (ShutdownRequest restart) -> do
-      -- TODO: Implement actual shutdown logic in RuntimeManager
-      -- RM.enqueueShutdown manager restart
-      return $ replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply restart)
+      -- Acknowledge shutdown request. Actual termination is handled by Jupyter.
+      -- The kernel process will be terminated by SIGTERM from Jupyter.
+      replyEnvelope envelope "shutdown_reply" (Aeson.toJSON $ ShutdownReply restart)
 
 -- | Helper to create a reply envelope.
--- Creates a properly structured reply envelope with signature payload.
--- Fix for: Replaced 'undefined' placeholder with proper signaturePayloadFrom call.
+-- Creates a properly structured reply envelope with signature payload, proper UUID, and current timestamp.
+-- Fixed: Generate proper UUID for message ID and update timestamp to current time.
 replyEnvelope :: (Aeson.ToJSON a)
               => ProtocolEnvelope any
               -> Text
               -> a
-              -> ProtocolEnvelope a
-replyEnvelope reqEnv newMsgType content =
+              -> IO (ProtocolEnvelope a)
+replyEnvelope reqEnv newMsgType content = do
+  -- Generate proper UUID for message ID
+  msgUuid <- UUID.nextRandom
+  currentTime <- getCurrentTime
+
   let reqHdr = envelopeHeader reqEnv
       newHdr = MessageHeader
-        { msgId = "reply-" <> msgId reqHdr -- TODO: Generate proper UUID
+        { msgId = UUID.toText msgUuid
         , msgType = newMsgType
         , session = session reqHdr
         , username = username reqHdr
         , version = version reqHdr
-        , date = date reqHdr -- TODO: Update timestamp
+        , date = Just currentTime
         }
       metadata = Aeson.object []
-  in ProtocolEnvelope
+
+  return ProtocolEnvelope
        { envelopeIdentities = envelopeIdentities reqEnv
        , envelopeHeader = newHdr
        , envelopeParent = Just reqHdr

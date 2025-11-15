@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed - Jupyter Kernel Protocol Improvements (2025-11-15)
+
+- **Critical: Message ID generation** - Replaced hardcoded "reply-" prefix with proper UUID v4 generation using `Data.UUID.V4`
+  - Fixed `Router.replyEnvelope` to generate unique message IDs for all reply envelopes
+  - Ensures Jupyter can properly track message relationships and handle concurrent requests
+
+- **Critical: Timestamp handling** - Updated reply envelopes to use current system time
+  - Changed `Router.replyEnvelope` signature to `IO (ProtocolEnvelope a)` to capture current time
+  - All reply messages now have accurate timestamps for proper Jupyter protocol compliance
+
+- **GHC version detection** - Implemented dynamic GHC version detection
+  - Uses hint library to query `System.Info.compilerVersion` at runtime
+  - Displays actual GHC version in kernel_info_reply instead of hardcoded value
+  - Graceful fallback to "GHC (version unknown)" if detection fails
+
+- **Implementation version** - Uses Cabal-generated version from Paths module
+  - Replaced hardcoded "0.1.0" with `Paths_hs_jupyter_kernel.version`
+  - Automatically tracks actual package version from cabal file
+
+- **Control loop interrupt handling** - Implemented full control message routing
+  - Control loop now properly routes interrupt_request and shutdown_request messages
+  - Added signature validation for control messages
+  - Interrupt requests are now processed through the runtime manager
+  - Shutdown requests set shutdown flag and return proper acknowledgment
+
+- **Shutdown protocol** - Improved shutdown request handling
+  - Returns proper shutdown_reply with restart flag
+  - Documents that actual process termination is handled by Jupyter via SIGTERM
+  - Removed non-existent `enqueueShutdown` call
+
+### Technical Details
+
+- Modified `src/HsJupyter/Router.hs`:
+  - Added imports: `Data.UUID`, `Data.UUID.V4`, `Data.Version`, `Language.Haskell.Interpreter`, `Data.Time.Clock`
+  - Updated `replyEnvelope` to generate UUIDs and timestamps
+  - Enhanced `handleKernelInfo` with dynamic version detection
+  - Simplified `handleShutdown` to acknowledge without runtime manager dependency
+
+- Modified `src/HsJupyter/KernelProcess.hs`:
+  - Enhanced `controlLoop` to route control messages through `handleRequest`
+  - Added signature validation for control messages
+  - Implemented proper reply envelope rendering and transmission
+
 ### Added - Installation & CLI Infrastructure (Feature 004)
 
 #### 🎯 Core Commands

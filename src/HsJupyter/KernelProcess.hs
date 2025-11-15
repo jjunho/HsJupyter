@@ -176,15 +176,38 @@ payloadLimitBytes :: Int64
 payloadLimitBytes = 1024 * 1024
 
 controlLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> IORef Bool -> IO ()
-controlLoop ctx _keyBytes controlSock shutdownRef = forever $ runKatipContextT (logEnv ctx) () "control" $ do
+controlLoop ctx keyBytes controlSock shutdownRef = forever $ runKatipContextT (logEnv ctx) () "control" $ do
   frames <- liftIO $ Z.receiveMulti controlSock
+  logFM DebugS $ logStr $ "Control loop: received " <> show (length frames) <> " frames"
+
   case parseEnvelopeFrames frames of
     Left (EnvelopeFrameError err) ->
       logFM WarningS $ logStr $ "Malformed control frame: " <> T.unpack err
     Right envelope -> do
-      -- TODO: Implement interrupt logic
-      logFM InfoS $ logStr $ "Control loop received: " <> show (envelopeHeader envelope)
-      when (msgType (envelopeHeader envelope) == "shutdown_request") $
+      let mtype = msgType (envelopeHeader envelope)
+      logFM InfoS $ logStr $ "Control loop: parsed envelope, msg_type=" <> T.unpack mtype
+
+      -- Route based on message type (interrupt_request, shutdown_request)
+      let valid = verifySignature keyBytes envelope
+      unless valid $
+        logFM WarningS "Rejected control envelope with invalid signature"
+
+      result <- if not valid
+        then return $ Left SignatureValidationFailed
+        else liftIO $ handleRequest ctx (bridgeManager ctx) envelope
+
+      case result of
+        Left bridgeErr ->
+          logFM ErrorS $ logStr $ T.unpack (bridgeErrorMessage bridgeErr)
+        Right envelopes -> do
+          logFM InfoS $ logStr $ "Control loop: sending " <> show (length envelopes) <> " reply envelope(s)"
+          for_ envelopes $ \env -> do
+            let rendered = renderEnvelopeFrames keyBytes env
+            logFM DebugS $ logStr $ "Control loop: sending reply (" <> show (length rendered) <> " frames)"
+            liftIO $ sendFrames controlSock rendered
+
+      -- Set shutdown flag if shutdown was requested
+      when (mtype == "shutdown_request") $
         liftIO $ writeIORef shutdownRef True
 
 heartbeatLoop :: Z.Socket Z.Rep -> IORef UTCTime -> IO ()
