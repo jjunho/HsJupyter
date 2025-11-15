@@ -137,14 +137,16 @@ shellLoop :: BridgeContext -> BS.ByteString -> Z.Socket Z.Router -> Z.Socket Z.P
 shellLoop ctx keyBytes shellSock iopubSock _shutdownRef = forever $ runKatipContextT (logEnv ctx) () "shell" $ do
   logFM InfoS "Shell loop: waiting for message..."
   frames <- liftIO $ Z.receiveMulti shellSock
-  logFM DebugS $ logStr $ "Shell loop: received " <> show (length frames) <> " frames"
-  
+  logFM InfoS $ logStr $ "Shell loop: received " <> show (length frames) <> " total frames"
+  logFM DebugS $ logStr $ "Frame lengths: " <> show (map BS.length frames)
+
   case parseEnvelopeFrames frames of
     Left (EnvelopeFrameError err) ->
       logFM ErrorS $ logStr $ "Shell loop: parseEnvelopeFrames failed: " <> T.unpack err
     Right envelope -> do
       let mtype = msgType (envelopeHeader envelope)
-      logFM InfoS $ logStr $ "Shell loop: parsed envelope, msg_type=" <> T.unpack mtype
+          identityCount = length (envelopeIdentities envelope)
+      logFM InfoS $ logStr $ "Shell loop: parsed envelope, msg_type=" <> T.unpack mtype <> ", identities=" <> show identityCount
       
       -- Route based on message type
       let valid = verifySignature keyBytes envelope
@@ -161,12 +163,26 @@ shellLoop ctx keyBytes shellSock iopubSock _shutdownRef = forever $ runKatipCont
         Right envelopes -> do
           logFM InfoS $ logStr $ "Shell loop: sending " <> show (length envelopes) <> " reply envelope(s)"
           for_ (zip [0 :: Int ..] envelopes) $ \(idx, env) -> do
-            let rendered = renderEnvelopeFrames keyBytes env
+            -- Router sockets require at least one identity frame for routing
+            -- If identity frames are missing, add a default one to prevent routing failure
+            let fixedEnv = if null (envelopeIdentities env)
+                          then -- This should never happen with proper Router socket communication
+                               -- but we add a default identity to be defensive
+                               env { envelopeIdentities = [BS.pack "default"] }
+                          else env
+            when (null (envelopeIdentities env)) $
+              logFM WarningS $ logStr $ "Warning: Reply envelope had no identity frames! Added default identity."
+            logFM DebugS $ logStr $ "Envelope identities: " <> show (length (envelopeIdentities fixedEnv)) <> " frame(s)"
+            let rendered = renderEnvelopeFrames keyBytes fixedEnv
             if idx == 0
               then do
-                logFM DebugS $ logStr $ "Shell loop: sending reply on shell socket (" <> show (length rendered) <> " frames)"
-                liftIO $ sendFrames shellSock rendered
-              else liftIO $ sendIOPub env rendered
+                logFM InfoS $ logStr $ "Shell loop: sending reply on shell socket (" <> show (length rendered) <> " frames)"
+                logFM DebugS $ logStr $ "Frame breakdown: " <> show (length (envelopeIdentities fixedEnv)) <> " identity + 6 payload frames"
+                result <- liftIO $ try (sendFrames shellSock rendered) :: KatipContextT IO (Either Z.ZMQError ())
+                case result of
+                  Left err -> logFM ErrorS $ logStr $ "Failed to send reply on shell socket: " <> displayException err
+                  Right () -> logFM DebugS "Successfully sent reply on shell socket"
+              else liftIO $ sendIOPub fixedEnv rendered
   where
     sendIOPub env rendered =
       let topic = TE.encodeUtf8 (msgType (envelopeHeader env))
