@@ -14,6 +14,7 @@ import           Data.Aeson (eitherDecodeFileStrict')
 import           Data.Int (Int64)
 import           Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
 import           Data.Foldable (for_)
@@ -168,10 +169,10 @@ shellLoop ctx keyBytes shellSock iopubSock _shutdownRef = forever $ runKatipCont
             let fixedEnv = if null (envelopeIdentities env)
                           then -- This should never happen with proper Router socket communication
                                -- but we add a default identity to be defensive
-                               env { envelopeIdentities = [BS.pack "default"] }
+                               env { envelopeIdentities = [BS8.pack "default"] }
                           else env
             when (null (envelopeIdentities env)) $
-              logFM WarningS $ logStr $ "Warning: Reply envelope had no identity frames! Added default identity."
+              logFM WarningS $ logStr ("Warning: Reply envelope had no identity frames! Added default identity." :: String)
             logFM DebugS $ logStr $ "Envelope identities: " <> show (length (envelopeIdentities fixedEnv)) <> " frame(s)"
             let rendered = renderEnvelopeFrames keyBytes fixedEnv
             if idx == 0
